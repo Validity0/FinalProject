@@ -13,7 +13,10 @@
                 "-I",
                 "\"${workspaceFolder}\"/headers",
                 "-ggdb",
-                "\"${workspaceFolder}\"/source/*.cpp"
+                "\"${workspaceFolder}\"/source/*.cpp",
+                "-lgdiplus",
+                "-lgdi32",
+                "-luser32"
             ],
             "group": {
                 "kind": "build",
