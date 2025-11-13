@@ -10,6 +10,8 @@ using namespace Gdiplus;
 int playerX = 100;
 int playerY = 100;
 
+int speed = 5;
+
 // window size
 int windowWidth = 800;
 int windowHeight = 600;
@@ -28,19 +30,38 @@ Image* shipIdle = nullptr;
 // Forward declare draw function
 void Draw(HDC hdc);
 
+void movePlayer(string Direction){
+    if (Direction == "Up"){
+        //every frame slowly change the speed until it reaches the desired speed
+    }
+    else if (Direction == "Down"){
+        playerY += 5;
+    }
+    else if (Direction == "Left"){
+        playerX -= 5;
+    }
+    else if (Direction == "Right"){
+        playerX += 5;
+    }
+    else{
+        exit(1);
+    }
+}
+
 // Update movement
 void update() {
+
     if(playerX > 0){
-        if (keys['A']) playerX -= 5;
+        if (keys['A']) movePlayer("Left");
     }
     if(playerX < windowWidth - 85){
-        if (keys['D']) playerX += 5;
+        if (keys['D']) movePlayer("Right");
     }
     if(playerY > 0){
-        if (keys['W']) playerY -= 5;
+        if (keys['W']) movePlayer("Up");
     }
     if(playerY < windowHeight - 50){
-        if (keys['S']) playerY += 5;
+        if (keys['S']) movePlayer("Down");
     }
 
     cout << "X: " << playerX << " Y: " << playerY << endl;
