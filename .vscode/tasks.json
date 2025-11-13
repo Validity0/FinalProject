@@ -14,9 +14,9 @@
                 "\"${workspaceFolder}\"/headers",
                 "-ggdb",
                 "\"${workspaceFolder}\"/source/*.cpp",
-                "-lgdiplus",
-                "-lgdi32",
-                "-luser32"
+                "-lgdiplus",// must add these three here for it to work for some reason.
+                "-lgdi32",//    |
+                "-luser32"//    V
             ],
             "group": {
                 "kind": "build",

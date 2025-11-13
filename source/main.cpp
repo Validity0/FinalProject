@@ -10,6 +10,10 @@ using namespace Gdiplus;
 int playerX = 100;
 int playerY = 100;
 
+// window size
+int windowWidth = 800;
+int windowHeight = 600;
+
 // Track keys being pressed
 bool keys[256] = { false };
 
@@ -22,20 +26,20 @@ GdiplusStartupInput gdiplusStartupInput;
 Image* shipIdle = nullptr;
 
 // Forward declare draw function
-void Draw(HDC hdc, int width, int height);
+void Draw(HDC hdc);
 
 // Update movement
 void update() {
     if(playerX > 0){
         if (keys['A']) playerX -= 5;
     }
-    if(playerX < 700){
+    if(playerX < windowWidth - 85){
         if (keys['D']) playerX += 5;
     }
     if(playerY > 0){
         if (keys['W']) playerY -= 5;
     }
-    if(playerY < 520){
+    if(playerY < windowHeight - 50){
         if (keys['S']) playerY += 5;
     }
 
@@ -54,6 +58,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_DESTROY:
         running = false;
         PostQuitMessage(0);
+        break;
+    case WM_SIZE:
+        windowWidth = LOWORD(lParam);
+        windowHeight = HIWORD(lParam);
         break;
     default:
         return DefWindowProc(hwnd, msg, wParam, lParam);
@@ -90,7 +98,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
     // Main game loop (~60 FPS)
     const int FPS = 60;
-    const int frameDelay = 1000 / FPS;
+    const int frameDelay = (1000 / FPS);
 
     MSG msg;
     while (running) {
@@ -106,9 +114,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         HDC hdc = GetDC(hwnd);
         RECT rect;
         GetClientRect(hwnd, &rect);
-        int width = rect.right - rect.left;
-        int height = rect.bottom - rect.top;
-        Draw(hdc, width, height);
+        windowWidth = rect.right - rect.left;
+        windowHeight = rect.bottom - rect.top;
+        Draw(hdc);
         ReleaseDC(hwnd, hdc);
 
         Sleep(frameDelay);
@@ -121,9 +129,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 }
 
 // Draw everything here
-void Draw(HDC hdc, int width, int height) {
+void Draw(HDC hdc) {
     Graphics graphics(hdc);
-    Bitmap buffer(width, height, &graphics);  // Offscreen buffer
+    Bitmap buffer(windowWidth, windowHeight, &graphics);  // Offscreen buffer
     Graphics g(&buffer);
 
     // Fill background black
@@ -134,5 +142,5 @@ void Draw(HDC hdc, int width, int height) {
         g.DrawImage(shipIdle, playerX, playerY, 84, 48);
 
     // Draw buffer to the screen
-    graphics.DrawImage(&buffer, 0, 0, width, height);
+    graphics.DrawImage(&buffer, 0, 0, windowWidth, windowHeight);
 }
