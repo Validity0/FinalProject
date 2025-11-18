@@ -7,7 +7,7 @@ class SpaceShip {
 private:
     Vector2D pos;
     Vector2D velocity;
-    double rotationAngle;
+    int rotationAngle;
     int targetAngle;
     void addVelocity(const Vector2D);
     void checkRotation();
@@ -15,7 +15,7 @@ private:
 public:
     SpaceShip();
     Vector2D getVelocity() const { return velocity; };
-    double getRotationAngle() const { return rotationAngle; };
+    int getRotationAngle() const { return rotationAngle; };
     void setRotationAngle(double angle) { rotationAngle = angle; };
 
     //Applies force in the ship’s facing direction (forward backward)

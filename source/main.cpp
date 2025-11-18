@@ -63,14 +63,14 @@ void getShipAction(HWND hwnd)
             action = {1, 0};
         }
         else if (keys['Q'])
-        {
+        {   
             calledAction = true;
-            action = {2, -10};
+            action = {2, ship.getRotationAngle() - 15};
         }
         else if (keys['E'])
         {
             calledAction = true;
-            action = {2, 10};
+            action = {2, ship.getRotationAngle() + 15};
         }
     }
     else if (calledAction)

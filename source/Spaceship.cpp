@@ -78,6 +78,7 @@ bool SpaceShip::brake(int speed = 0)
 
 bool SpaceShip::rotate(const double targetAngle)
 {
+    std::cout << rotationAngle << " This is debug";
     if (abs(rotationAngle - targetAngle) > 6)
     {
         (rotationAngle < targetAngle) ? (rotationAngle += 5) : (rotationAngle -= 5);
