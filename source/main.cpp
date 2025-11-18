@@ -1,50 +1,143 @@
+#define NOMINMAX
 #include <windows.h>
+#include <objidl.h>
 #include <gdiplus.h>
+#include <ctime>
+#include <thread>
 #include <iostream>
-using namespace std;
-using namespace Gdiplus;
+#include "SpaceShip.h"
 
-#pragma comment(lib, "Gdiplus.lib")
+// Action Tracking
+bool calledAction{false};
+std::vector<int> action; // {type, p1, p2, cooldownMs}
+std::chrono::steady_clock::time_point nextActionTime = std::chrono::steady_clock::now();
 
 // Player position
-int playerX = 100;
-int playerY = 100;
+SpaceShip ship;
+double playerX = 100;
+double playerY = 100;
+double lastPlayerX = -1;
+double lastPlayerY = -1;
 
 // Track keys being pressed
-bool keys[256] = { false };
+bool keys[256] = {false};
 
 // Flag to run the game loop
 bool running = true;
 
 // Global GDI+ objects
 ULONG_PTR gdiplusToken;
-GdiplusStartupInput gdiplusStartupInput;
-Image* shipIdle = nullptr;
+Gdiplus::GdiplusStartupInput gdiplusStartupInput;
+Gdiplus::Image *shipIdle = nullptr;
 
 // Forward declare draw function
 void Draw(HDC hdc, int width, int height);
 
-// Update movement
-void update() {
-    if(playerX > 0){
-        if (keys['A']) playerX -= 5;
+void getShipAction(HWND hwnd)
+{
+    auto now = std::chrono::steady_clock::now();
+
+    if (!calledAction && now >= nextActionTime)
+    {
+        if (keys['A'])
+        {
+            calledAction = true;
+            action = {3, -1, 1, 150}; // dynamic cooldown
+            nextActionTime = now + std::chrono::milliseconds(action[3]);
+        }
+        else if (keys['D'])
+        {
+            calledAction = true;
+            action = {3, 1, 1, 150};
+            nextActionTime = now + std::chrono::milliseconds(action[3]);
+        }
+        else if (keys['W'])
+        {
+            calledAction = true;
+            action = {0, 1, 400};
+            nextActionTime = now + std::chrono::milliseconds(action[3]);
+        }
+        else if (keys['S'])
+        {
+            calledAction = true;
+            action = {1, 0};
+        }
+        else if (keys['Q'])
+        {
+            calledAction = true;
+            action = {2, -10};
+        }
+        else if (keys['E'])
+        {
+            calledAction = true;
+            action = {2, 10};
+        }
     }
-    if(playerX < 700){
-        if (keys['D']) playerX += 5;
-    }
-    if(playerY > 0){
-        if (keys['W']) playerY -= 5;
-    }
-    if(playerY < 520){
-        if (keys['S']) playerY += 5;
+    else if (calledAction)
+    {
+        bool actionIsDone = false;
+
+        switch (action[0])
+        {
+        case 0: // thrust
+            actionIsDone = true;
+            ship.thrust(action[1]);
+            break;
+        case 1: // brake
+            actionIsDone = ship.brake(action[1]);
+            break;
+        case 2: // rotate
+            actionIsDone = ship.rotate(action[1]);
+            break;
+        case 3: // strafe
+            actionIsDone = true;
+            ship.strafe(action[1], action[2]);
+            break;
+        }
+
+        // End the action when its dynamic cooldown expires
+        if (now >= nextActionTime && actionIsDone)
+        {
+            calledAction = false;
+        }
     }
 
-    cout << "X: " << playerX << " Y: " << playerY << endl;
+    // --- Update position using velocity ---
+
+    HDC hdc = GetDC(hwnd);
+    RECT rect;
+    GetClientRect(hwnd, &rect);
+    int width = rect.right - rect.left;
+    int height = rect.bottom - rect.top;
+
+    // --- Wrap horizontally ---
+    if (playerX < 0)
+        playerX = width;
+    else if (playerX > width)
+        playerX = 0;
+
+    // --- Wrap vertically ---
+    if (playerY < 0)
+        playerY = height;
+    else if (playerY > height)
+        playerY = 0;
+}
+
+void updateShipPosition()
+{
+    Vector2D velocity = ship.getVelocity(); // assume returns vector with getX(), getY()
+    double vx = velocity.getX() / 10.0;
+    double vy = velocity.getY() / 10.0;
+
+    playerX += vx;
+    playerY += vy;
 }
 
 // Game window procedure
-LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    switch (msg) {
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    switch (msg)
+    {
     case WM_KEYDOWN:
         keys[wParam] = true;
         break;
@@ -61,14 +154,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     return 0;
 }
 
-// Main entry point
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
+// Main entrypoint
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
+{
+
     // Initialize GDI+
     GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, nullptr);
-    shipIdle = new Image(L"Images/shipIdle.png"); // Load your image here
+    shipIdle = new Gdiplus::Image(L"Images/shipIdle.png"); // Load your image here
 
     // Register window class
-    WNDCLASSEX wc = { sizeof(WNDCLASSEX) };
+    WNDCLASSEX wc = {sizeof(WNDCLASSEX)};
     wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
@@ -82,25 +177,26 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         0, TEXT("MyGameWindow"), TEXT("My 2D Game"),
         WS_OVERLAPPEDWINDOW | WS_VISIBLE,
         CW_USEDEFAULT, CW_USEDEFAULT, 800, 600,
-        NULL, NULL, hInstance, NULL
-    );
+        NULL, NULL, hInstance, NULL);
 
     ShowWindow(hwnd, nCmdShow);
     UpdateWindow(hwnd);
 
     // Main game loop (~60 FPS)
-    const int FPS = 60;
+    const int FPS = 240;
     const int frameDelay = 1000 / FPS;
 
     MSG msg;
-    while (running) {
+    while (running)
+    {
         // Handle Windows messages
-        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+        {
             TranslateMessage(&msg);
             DispatchMessage(&msg);
         }
-
-        update();
+        getShipAction(hwnd);
+        updateShipPosition();
 
         // Redraw window
         HDC hdc = GetDC(hwnd);
@@ -116,23 +212,31 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
     // Cleanup
     delete shipIdle;
-    GdiplusShutdown(gdiplusToken);
+    Gdiplus::GdiplusShutdown(gdiplusToken);
     return 0;
 }
 
 // Draw everything here
-void Draw(HDC hdc, int width, int height) {
-    Graphics graphics(hdc);
-    Bitmap buffer(width, height, &graphics);  // Offscreen buffer
-    Graphics g(&buffer);
+void Draw(HDC hdc, int width, int height)
+{
+    Gdiplus::Graphics graphics(hdc);
+    Gdiplus::Bitmap buffer(width, height, &graphics);
+    Gdiplus::Graphics g(&buffer);
 
-    // Fill background black
-    g.Clear(Color(255, 0, 0, 0));
+    g.Clear(Gdiplus::Color(255, 0, 0, 0));
 
-    // Draw the player image
     if (shipIdle)
+    {
+        // Apply rotation around ship center
+        g.TranslateTransform(playerX + 42, playerY + 24); // center of sprite
+        g.RotateTransform(ship.getRotationAngle());
+        g.TranslateTransform(-(playerX + 42), -(playerY + 24));
+
         g.DrawImage(shipIdle, playerX, playerY, 84, 48);
 
-    // Draw buffer to the screen
+        // Reset transform
+        g.ResetTransform();
+    }
+
     graphics.DrawImage(&buffer, 0, 0, width, height);
 }

@@ -1,54 +1,65 @@
 #pragma once
-using namespace std;
+#include <cmath>
+#include <string>
 
-class Velocity{
+const double pi = 2 * sin(1.0); 
+
+class Vector2D{
 private:
     double x;
     double y;
 
 public:
     /*************************************
-    * @brief Creates a velocity vector with x and y maginitudes set to 0
+    * @brief Creates a 2D Vector with x and y maginitudes set to 0
     *
     *************************************/
-    Velocity();
+    Vector2D();
     /*************************************
-    * Creates a velocity vector with x and y maginitudes
+    * Creates a vector vector with x and y maginitudes
     * set to parameters
     *
     * @param x horizontal speed or a
     * @param y vertical speed or b
     *************************************/
-    Velocity(double x, double y);
+    Vector2D(double x, double y);
 
     /*************************************
-    * Adds other velocity to self velocity.
+    * Adds other vector2d to self vector2d
     *
     * Negatives are allowed.
     *
-    * @param velocity Vector of Velocity to add to self
+    * @param vector Vector of vector to add to self
     *************************************/
-    void addVelocity(const Velocity velocity);
+    void add(const Vector2D vector);
     
     /*************************************
     * @brief Gets the horizontal or x component of
     * self vector
     *
     *************************************/
-    double getXVelocity() const;
+    double getX() const;
     /*************************************
     * @brief Gets the vertical or y component of
     * self vector
     *
     *************************************/
-    double getYVelocity() const;
+    double getY() const;
 
     /*************************************
-    * @brief Checks if compared velocity equals
-    * self velocity
+    * @brief Checks if compared vector equals
+    * self vector
     * 
-    * @param other velocity component to compare
+    * @param other vector component to compare
     *************************************/
-    bool equals(const Velocity other) const;
+    bool equals(const Vector2D other) const;
+        /*************************************
+    * @brief Gets hypotenuse of Vector
+    * 
+    * @returns double speed
+    *************************************/
+    double speed() const;
+
+    std::string print() const;
     
 };
