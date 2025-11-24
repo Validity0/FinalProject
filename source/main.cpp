@@ -1,366 +1,412 @@
-#define NOMINMAX
-#include <windows.h>
-#include <objidl.h>
-#include <gdiplus.h>
-#include <ctime>
-#include <thread>
 #include <iostream>
 #include <vector>
+#include <random>
+#include <iomanip>
+#include <fstream>
+#include <cfloat>
+#include <limits>
+#include <cmath>
 #include <algorithm>
+#include <chrono>
+#include <string>
 #include "SpaceShip.h"
+#include "SpaceStation.h"
 #include "Bullet.h"
 #include "NeuralNetwork.h"
+#include "TrainingManager.h"
+#include "GameWindow.h"
 
-// ========== Neural Network AI System ==========
-NeuralNetwork* aiController = nullptr;
-bool useAI = false;  // Toggle between manual and AI control
+// ========== GAME CONFIGURATION ==========
+const int WINDOW_WIDTH = 800;
+const int WINDOW_HEIGHT = 600;
+const int STATION_X = WINDOW_WIDTH / 2;
+const int STATION_Y = WINDOW_HEIGHT / 2;
 
-// Game state for AI input
-struct GameState {
-    double shipX;
-    double shipY;
-    double shipVelX;
-    double shipVelY;
-    double nearestThreatX;
-    double nearestThreatY;
-};
-
-GameState currentGameState = {0, 0, 0, 0, 0, 0};
-
-// Map neural network output to action
-void executeAIAction(float aiOutput) {
-    // Output range: 0.0 to 1.0
-    if (aiOutput < 0.3f) {
-        // Brake
-    } else if (aiOutput < 0.5f) {
-        // Thrust
-    } else if (aiOutput < 0.75f) {
-        // Strafe left
-    } else {
-        // Strafe right
-    }
-}
-
-// ========== Game Engine ==========
-
-// Action Tracking
-bool calledAction{false};
-std::vector<int> action; // {type, p1, p2, cooldownMs}
-std::chrono::steady_clock::time_point nextActionTime = std::chrono::steady_clock::now();
-
-// Player position
+// ========== GAME STATE ==========
 SpaceShip ship;
+SpaceStation station(STATION_X, STATION_Y);
+std::vector<Bullet> enemyBullets;
+NeuralNetwork* aiController = nullptr;
+int bulletFireCounter = 0;  // Match training simulation counter
+const int BULLET_FIRE_RATE = 20;
+const float BULLET_SPEED = 3.0f;
+
+// Ship position is now stored in the ship object
+// These are updated from ship.getPosition() for convenience
 double playerX = 100;
 double playerY = 100;
-double lastPlayerX = -1;
-double lastPlayerY = -1;
 
-// Bullet management
-std::vector<Bullet> bullets;
-const int maxBullets = 100;
+bool gameRunning = true;
+bool gameWon = false;
+bool gameLost = false;
+std::string gameStatus = "Running";
+ShipState currentShipState = ShipState::Idle;
 
-// Track keys being pressed
-bool keys[256] = {false};
-
-// Flag to run the game loop
-bool running = true;
-
-// Global GDI+ objects
-ULONG_PTR gdiplusToken;
-Gdiplus::GdiplusStartupInput gdiplusStartupInput;
-Gdiplus::Image *shipIdle = nullptr;
-Gdiplus::Image *shipBoost = nullptr;
-Gdiplus::Image *shipLeft = nullptr;
-Gdiplus::Image *shipRight = nullptr;
-
-// Forward declare draw function
-void Draw(HDC hdc, int width, int height);
-
-void getShipAction(HWND hwnd)
-{
-    auto now = std::chrono::steady_clock::now();
-
-    if (!calledAction && now >= nextActionTime)
-    {
-        if (keys['A'])
-        {
-            calledAction = true;
-            action = {3, -1, 1, 150}; // dynamic cooldown
-            nextActionTime = now + std::chrono::milliseconds(action[3]);
-        }
-        else if (keys['D'])
-        {
-            calledAction = true;
-            action = {3, 1, 1, 150};
-            nextActionTime = now + std::chrono::milliseconds(action[3]);
-        }
-        else if (keys['W'])
-        {
-            calledAction = true;
-            action = {0, 1, 400};
-            nextActionTime = now + std::chrono::milliseconds(action[3]);
-        }
-        else if (keys['S'])
-        {
-            calledAction = true;
-            action = {1, 0};
-        }
-        else if (keys['Q'])
-        {
-            calledAction = true;
-            action = {2, ship.getRotationAngle() - 15};
-        }
-        else if (keys['E'])
-        {
-            calledAction = true;
-            action = {2, ship.getRotationAngle() + 15};
-        }
-    }
-    else if (calledAction)
-    {
-        bool actionIsDone = false;
-
-        switch (action[0])
-        {
-        case 0: // thrust
-            actionIsDone = true;
-            ship.thrust(action[1]);
-            break;
-        case 1: // brake
-            actionIsDone = ship.brake(action[1]);
-            break;
-        case 2: // rotate
-            actionIsDone = ship.rotate(action[1]);
-            break;
-        case 3: // strafe
-            actionIsDone = true;
-            ship.strafe(action[1], action[2]);
-            break;
-        }
-
-        // End the action when its dynamic cooldown expires
-        if (now >= nextActionTime && actionIsDone)
-        {
-            calledAction = false;
-        }
-    }
-
-    // --- Update position using velocity ---
-
-    HDC hdc = GetDC(hwnd);
-    RECT rect;
-    GetClientRect(hwnd, &rect);
-    int width = rect.right - rect.left;
-    int height = rect.bottom - rect.top;
-
-    // --- Wrap horizontally ---
-    if (playerX < 0)
-        playerX = width;
-    else if (playerX > width)
-        playerX = 0;
-
-    // --- Wrap vertically ---
-    if (playerY < 0)
-        playerY = height;
-    else if (playerY > height)
-        playerY = 0;
-}
+// ========== GAME MECHANICS ==========
 
 void updateShipPosition()
 {
-    Vector2D velocity = ship.getVelocity();
-    double vx = velocity.getX() / 10.0;
-    double vy = velocity.getY() / 10.0;
+    // Update position using SpaceShip methods (SAME AS TRAINING)
+    ship.clampVelocity(5.0f);
+    ship.updatePosition();
 
-    playerX += vx;
-    playerY += vy;
+    // Get position from ship
+    Vector2D pos = ship.getPosition();
+    playerX = pos.getX();
+    playerY = pos.getY();
 
+    // Wrap around screen
+    if (playerX < 0) playerX = WINDOW_WIDTH;
+    else if (playerX > WINDOW_WIDTH) playerX = 0;
+
+    if (playerY < 0) playerY = WINDOW_HEIGHT;
+    else if (playerY > WINDOW_HEIGHT) playerY = 0;
+
+    // Update ship position
     ship.setPosition(Vector2D(playerX, playerY));
 }
 
-void updateBullets()
+void updateEnemyBullets()
 {
     // Update all bullets
-    for (auto& bullet : bullets) {
+    for (auto& bullet : enemyBullets) {
         bullet.update();
 
         // Check collision with ship
-        if (bullet.hasHitShip()) {
-            bullet.setPosition(Vector2D(-1000, -1000)); // Remove off-screen
+        Vector2D shipPos(playerX, playerY);
+        Vector2D bulletPos = bullet.getPosition();
+        double dx = bulletPos.getX() - shipPos.getX();
+        double dy = bulletPos.getY() - shipPos.getY();
+        double distance = std::sqrt(dx * dx + dy * dy);
+
+        if (distance < 20.0) {
+            gameLost = true;
+            gameStatus = "LOST - Hit by bullet!";
+            gameRunning = false;
         }
     }
 
-    // Remove bullets that are off-screen
-    bullets.erase(
-        std::remove_if(bullets.begin(), bullets.end(),
+    // Remove off-screen bullets
+    enemyBullets.erase(
+        std::remove_if(enemyBullets.begin(), enemyBullets.end(),
             [](const Bullet& b) {
                 Vector2D pos = b.getPosition();
-                return pos.getX() < -50 || pos.getX() > 850 ||
-                       pos.getY() < -50 || pos.getY() > 650;
+                return pos.getX() < -50 || pos.getX() > WINDOW_WIDTH + 50 ||
+                       pos.getY() < -50 || pos.getY() > WINDOW_HEIGHT + 50;
             }),
-        bullets.end()
+        enemyBullets.end()
     );
 }
 
-// Game window procedure
-LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+void updateStationFire()
 {
-    switch (msg)
-    {
-    case WM_KEYDOWN:
-        keys[wParam] = true;
-        if (wParam == 'T') {
-            // Toggle AI control
-            useAI = !useAI;
+    // Use same counter logic as training simulation
+    bulletFireCounter++;
+    if (bulletFireCounter > BULLET_FIRE_RATE) {
+        // Fire bullet at spaceship (EXACTLY MATCHES TRAINING)
+        double dx = playerX - STATION_X;
+        double dy = playerY - STATION_Y;
+        double distance = std::sqrt(dx * dx + dy * dy);
+
+        if (distance > 0) {
+            double vx = (dx / distance) * BULLET_SPEED;
+            double vy = (dy / distance) * BULLET_SPEED;
+
+            Vector2D stationPos(STATION_X, STATION_Y);
+            Vector2D bulletVel(vx, vy);
+            enemyBullets.push_back(Bullet(stationPos, bulletVel, &ship));
         }
-        break;
-    case WM_KEYUP:
-        keys[wParam] = false;
-        break;
-    case WM_DESTROY:
-        running = false;
-        PostQuitMessage(0);
-        break;
-    default:
-        return DefWindowProc(hwnd, msg, wParam, lParam);
+
+        bulletFireCounter = 0;
     }
-    return 0;
 }
 
-// Main entrypoint
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
+void checkWinCondition()
 {
-    // Initialize Neural Network
-    aiController = new NeuralNetwork({6, 8, 4, 4});  // 6 inputs, 2 hidden layers, 4 output actions
+    Vector2D stationPos = station.getPosition();
+    double dx = playerX - stationPos.getX();
+    double dy = playerY - stationPos.getY();
+    double distance = std::sqrt(dx * dx + dy * dy);
 
-    // Initialize GDI+
-    GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, nullptr);
-    shipIdle = new Gdiplus::Image(L"Images/shipIdle.png");
-    shipBoost = new Gdiplus::Image(L"Images/shipBoost.png");
-    shipLeft = new Gdiplus::Image(L"Images/shipLeft.png");
-    shipRight = new Gdiplus::Image(L"Images/shipRight.png");
+    // Win if touching station (within radius)
+    if (distance < SpaceStation::RADIUS + 20) {
+        gameWon = true;
+        gameStatus = "WON - Reached the station!";
+        gameRunning = false;
+    }
+}
 
-    // Register window class
-    WNDCLASSEX wc = {sizeof(WNDCLASSEX)};
-    wc.style = CS_HREDRAW | CS_VREDRAW;
-    wc.lpfnWndProc = WndProc;
-    wc.hInstance = hInstance;
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
-    wc.lpszClassName = TEXT("MyGameWindow");
-    RegisterClassEx(&wc);
+void processAIAction(float thrustVal, float strafeVal, float rotationVal, float brakeVal)
+{
+    // Clamp all outputs to valid ranges
+    thrustVal = std::max(0.0f, std::min(1.0f, thrustVal));
+    strafeVal = std::max(-1.0f, std::min(1.0f, strafeVal));
+    rotationVal = std::max(-1.0f, std::min(1.0f, rotationVal));
+    brakeVal = std::max(0.0f, std::min(1.0f, brakeVal));
 
-    // Create window
-    HWND hwnd = CreateWindowEx(
-        0, TEXT("MyGameWindow"), TEXT("2D Space Game - Press T to toggle AI"),
-        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-        CW_USEDEFAULT, CW_USEDEFAULT, 800, 600,
-        NULL, NULL, hInstance, NULL);
+    // Apply using SpaceShip methods (SAME AS TRAINING SIMULATION)
+    // Thrust
+    if (thrustVal > 0.1f) {
+        ship.thrust(thrustVal * 0.5);
+        currentShipState = ShipState::Boost;
+    } else {
+        currentShipState = ShipState::Idle;
+    }
 
-    ShowWindow(hwnd, nCmdShow);
-    UpdateWindow(hwnd);
-
-    // Main game loop (~60 FPS)
-    const int FPS = 60;
-    const int frameDelay = 1000 / FPS;
-
-    MSG msg;
-    while (running)
-    {
-        // Handle Windows messages
-        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
-        {
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
-
-        if (useAI && aiController) {
-            // Update game state from current conditions
-            currentGameState.shipX = playerX;
-            currentGameState.shipY = playerY;
-            currentGameState.shipVelX = ship.getVelocity().getX();
-            currentGameState.shipVelY = ship.getVelocity().getY();
-
-            // Prepare AI input matrix (6 inputs)
-            Matrix aiInput(1, 6);
-            aiInput.data[0] = {
-                static_cast<float>(currentGameState.shipX / 800.0f),      // Normalized X
-                static_cast<float>(currentGameState.shipY / 600.0f),      // Normalized Y
-                static_cast<float>(currentGameState.shipVelX / 10.0f),    // Normalized Vel X
-                static_cast<float>(currentGameState.shipVelY / 10.0f),    // Normalized Vel Y
-                static_cast<float>(ship.getRotationAngle() / 360.0f),     // Rotation
-                static_cast<float>(bullets.size() / static_cast<float>(maxBullets))  // Bullet count ratio
-            };
-
-            // Get AI decision
-            Matrix prediction = aiController->predict(aiInput);
-            executeAIAction(prediction.data[0][0]);
+    // Strafe
+    if (std::abs(strafeVal) > 0.1f) {
+        ship.strafe(strafeVal > 0 ? 1 : -1, std::abs(strafeVal) * 0.3);
+        if (strafeVal < 0) {
+            currentShipState = ShipState::Left;
         } else {
-            getShipAction(hwnd);
+            currentShipState = ShipState::Right;
+        }
+    }
+
+    // Rotation
+    if (std::abs(rotationVal) > 0.05f) {
+        ship.setRotationAngle(ship.getRotationAngle() + rotationVal * 6.0);
+    }
+
+    // Brake
+    if (brakeVal > 0.1f) {
+        ship.applyDrag(1.0f - brakeVal * 0.1f);
+    }
+}
+
+void runGameMode()
+{
+    std::cout << "\n---------------------------------------" << std::endl;
+    std::cout << "|         SPACE STATION GAME             |" << std::endl;
+    std::cout << "|    AI Goal: Reach the Space Station    |" << std::endl;
+    std::cout << "---------------------------------------\n" << std::endl;
+
+    // Load best model (most up-to-date during training)
+    if (!aiController->loadModel("best_model.nn")) {
+        // Fall back to trained_model.nn if best_model doesn't exist
+        if (!aiController->loadModel("trained_model.nn")) {
+            std::cout << "Warning: Could not load any model. Using untrained network." << std::endl;
+        } else {
+            std::cout << "Loaded trained_model.nn" << std::endl;
+        }
+    } else {
+        std::cout << "Loaded best_model.nn (most recent)" << std::endl;
+    }
+
+    // Create game window
+    std::cout << "Creating game window..." << std::endl;
+    GameWindow window(WINDOW_WIDTH, WINDOW_HEIGHT, "Space Station AI Game");
+    if (!window.initialize()) {
+        std::cout << "Error: Could not create game window." << std::endl;
+        return;
+    }
+    std::cout << "Game window created successfully!" << std::endl;
+    std::cout << "Press SPACE in the game window to start!\n" << std::endl;
+
+    // Reset ship state and randomize starting position along edges (SAME AS TRAINING)
+    std::mt19937 rng(std::random_device{}());
+    std::uniform_int_distribution<int> edgePicker(0, 3);  // 0=top, 1=bottom, 2=left, 3=right
+    std::uniform_real_distribution<double> distX(50.0, WINDOW_WIDTH - 50.0);
+    std::uniform_real_distribution<double> distY(50.0, WINDOW_HEIGHT - 50.0);
+
+    // Spawn along a random edge
+    double startX, startY;
+    int edge = edgePicker(rng);
+    switch (edge) {
+        case 0:  // Top edge
+            startX = distX(rng);
+            startY = 50.0;
+            break;
+        case 1:  // Bottom edge
+            startX = distX(rng);
+            startY = WINDOW_HEIGHT - 50.0;
+            break;
+        case 2:  // Left edge
+            startX = 50.0;
+            startY = distY(rng);
+            break;
+        case 3:  // Right edge
+            startX = WINDOW_WIDTH - 50.0;
+            startY = distY(rng);
+            break;
+    }
+
+    ship.setPosition(Vector2D(startX, startY));
+    ship.setVelocity(Vector2D(0, 0));  // Reset velocity to zero!
+    ship.setRotationAngle(0);
+    playerX = startX;
+    playerY = startY;
+    enemyBullets.clear();  // Clear any bullets
+    bulletFireCounter = 0;  // Reset fire counter (same as training starts at 0)
+    gameRunning = true;
+    gameWon = false;
+    gameLost = false;
+    gameStatus = "Running";
+
+    // Wait for space key to start
+    bool gameStarted = false;
+    while (!gameStarted && window.isOpen()) {
+        window.processMessages();
+
+        // Render initial frame (frozen)
+        window.render(playerX, playerY, station, enemyBullets, 0, "Press SPACE to start", currentShipState);
+
+        // Check for space key
+        if (GetAsyncKeyState(VK_SPACE) & 0x8000) {
+            gameStarted = true;
+            std::cout << "Game started! Close the window to end the game.\n" << std::endl;
         }
 
+        Sleep(16);
+    }
+
+    int frameCount = 0;
+    const int MAX_FRAMES = 5000;
+
+    while (gameRunning && frameCount < MAX_FRAMES && window.isOpen()) {
+        frameCount++;
+
+        // Handle window messages
+        window.processMessages();
+
+        // AI decision FIRST (same order as training simulation)
+        // Training: sensors -> decision -> physics -> bullets update
+        // So AI sees bullet positions BEFORE they move this frame
+        // Calculate station info
+        double stationDx = STATION_X - playerX;
+        double stationDy = STATION_Y - playerY;
+        float stationDistance = std::sqrt(stationDx * stationDx + stationDy * stationDy);
+        float stationAngle = std::atan2(stationDy, stationDx);  // Absolute angle (same as training)
+
+        // Find closest bullet
+        float closestBulletDistance = 1000.0f;
+        float closestBulletAngle = 0.0f;
+        float closestBulletVelX = 0.0f;
+        float closestBulletVelY = 0.0f;
+
+        for (const auto& bullet : enemyBullets) {
+            Vector2D bPos = bullet.getPosition();
+            double bdx = bPos.getX() - playerX;
+            double bdy = bPos.getY() - playerY;
+            float bDist = std::sqrt(bdx * bdx + bdy * bdy);
+
+            if (bDist < closestBulletDistance) {
+                closestBulletDistance = bDist;
+                closestBulletAngle = std::atan2(bdy, bdx);  // Absolute angle (same as training)
+                Vector2D bVel = bullet.getVelocity();
+                closestBulletVelX = bVel.getX();
+                closestBulletVelY = bVel.getY();
+            }
+        }
+
+        // Build 12-input sensor array (EXACTLY MATCHES TRAINING SIMULATION)
+        Vector2D vel = ship.getVelocity();
+        Matrix gameState(1, 12);
+        gameState.data[0] = {
+            static_cast<float>(playerX / WINDOW_WIDTH),              // 0: Ship X
+            static_cast<float>(playerY / WINDOW_HEIGHT),             // 1: Ship Y
+            static_cast<float>(vel.getX() / 10.0f),                  // 2: Ship velocity X
+            static_cast<float>(vel.getY() / 10.0f),                  // 3: Ship velocity Y
+            0.0f,                                                     // 4: Ship rotation
+            static_cast<float>(stationDistance / 500.0f),             // 5: Station distance
+            static_cast<float>(stationAngle / 3.14159f),              // 6: Station angle
+            static_cast<float>(closestBulletDistance / 500.0f),       // 7: Closest bullet distance
+            static_cast<float>(closestBulletAngle / 3.14159f),        // 8: Closest bullet angle
+            static_cast<float>(closestBulletVelX / 10.0f),            // 9: Closest bullet vel X
+            static_cast<float>(closestBulletVelY / 10.0f),            // 10: Closest bullet vel Y
+            static_cast<float>(enemyBullets.size() / 10.0f)           // 11: Number of bullets
+        };
+
+        Matrix decision = aiController->predict(gameState);
+        // Extract 4 outputs: thrust, strafe, rotation, brake
+        processAIAction(
+            decision.data[0][0],  // thrust
+            decision.data[0][1],  // strafe
+            decision.data[0][2],  // rotation
+            decision.data[0][3]   // brake
+        );
+
+        // Update ship physics (same as training)
         updateShipPosition();
-        updateBullets();
 
-        // Redraw window
-        HDC hdc = GetDC(hwnd);
-        RECT rect;
-        GetClientRect(hwnd, &rect);
-        int width = rect.right - rect.left;
-        int height = rect.bottom - rect.top;
-        Draw(hdc, width, height);
-        ReleaseDC(hwnd, hdc);
+        // NOW update bullets and check collisions (AFTER ship moved, same as training)
+        updateStationFire();
+        updateEnemyBullets();
 
-        Sleep(frameDelay);
+        // Check win condition
+        checkWinCondition();
+
+        // Render game
+        window.render(playerX, playerY, station, enemyBullets, frameCount, gameStatus, currentShipState);
+
+        // Progress indicator
+        if (frameCount % 500 == 0) {
+            std::cout << "Frame " << frameCount << " | "
+                      << "Ship: (" << static_cast<int>(playerX) << ", " << static_cast<int>(playerY) << ") | "
+                      << "Station: (" << STATION_X << ", " << STATION_Y << ") | "
+                      << "Bullets: " << enemyBullets.size() << std::endl;
+        }
+
+        // Limit frame rate
+        Sleep(16);  // ~60 FPS
+    }
+
+    // Game over
+    std::cout << "\n---------------------------------------" << std::endl;
+    std::cout << "Game Over!" << std::endl;
+    std::cout << "Status: " << gameStatus << std::endl;
+    std::cout << "Frames played: " << frameCount << std::endl;
+    std::cout << "Final position: (" << static_cast<int>(playerX) << ", " << static_cast<int>(playerY) << ")" << std::endl;
+    std::cout << "---------------------------------------\n" << std::endl;
+
+    if (gameWon) {
+        std::cout << "SUCCESS! The AI reached the Space Station!" << std::endl;
+    } else if (gameLost) {
+        std::cout << "FAILED! The AI was destroyed." << std::endl;
+    } else {
+        std::cout << "TIME LIMIT! The AI ran out of time." << std::endl;
+    }
+    std::cout << std::endl;
+}
+
+void runTrainingMode()
+{
+    TrainingManager trainer(aiController);
+    trainer.train();
+}
+
+// ========== MAIN ==========
+
+int main() {
+    std::cout << "\n---------------------------------------" << std::endl;
+    std::cout << "|   SPACE STATION AI GAME & TRAINER      |" << std::endl;
+    std::cout << "---------------------------------------\n" << std::endl;
+
+    // Initialize neural network (12 inputs, 4 outputs: thrust, strafe, rotation, brake)
+    aiController = new NeuralNetwork({12, 32, 16, 4});
+
+    std::cout << "Select mode:" << std::endl;
+    std::cout << "1) Training - Train AI to reach station" << std::endl;
+    std::cout << "2) Game - Watch trained AI play" << std::endl;
+    std::cout << "Enter choice (1 or 2): ";
+
+    int choice;
+    std::cin >> choice;
+
+    std::cout << std::endl;
+
+    if (choice == 1) {
+        runTrainingMode();
+    } else if (choice == 2) {
+        runGameMode();
+    } else {
+        std::cout << "Invalid choice. Running training mode..." << std::endl;
+        runTrainingMode();
     }
 
     // Cleanup
     delete aiController;
-    delete shipIdle;
-    delete shipBoost;
-    delete shipLeft;
-    delete shipRight;
-    Gdiplus::GdiplusShutdown(gdiplusToken);
+
+    std::cout << "Program complete." << std::endl;
     return 0;
-}
-
-// Draw everything here
-void Draw(HDC hdc, int width, int height)
-{
-    Gdiplus::Graphics graphics(hdc);
-    Gdiplus::Bitmap buffer(width, height, &graphics);
-    Gdiplus::Graphics g(&buffer);
-
-    g.Clear(Gdiplus::Color(255, 0, 0, 0));
-
-    // Draw ship
-    if (shipIdle)
-    {
-        // Apply rotation around ship center
-        g.TranslateTransform(playerX + 42, playerY + 24); // center of sprite
-        g.RotateTransform(ship.getRotationAngle());
-        g.TranslateTransform(-(playerX + 42), -(playerY + 24));
-
-        g.DrawImage(shipIdle, playerX, playerY, 84, 48);
-
-        // Reset transform
-        g.ResetTransform();
-    }
-
-    // Draw bullets
-    Gdiplus::SolidBrush yellowBrush(Gdiplus::Color(255, 255, 255, 0));
-    for (const auto& bullet : bullets) {
-        Vector2D pos = bullet.getPosition();
-        g.FillEllipse(&yellowBrush, pos.getX() - 2, pos.getY() - 2, 4, 4);
-    }
-
-    // Draw AI status
-    if (useAI) {
-        Gdiplus::SolidBrush textBrush(Gdiplus::Color(255, 0, 255, 0));
-        Gdiplus::Font font(L"Arial", 12);
-        Gdiplus::PointF pointF(10, 10);
-        g.DrawString(L"AI: ON", -1, &font, pointF, &textBrush);
-    }
-
-    graphics.DrawImage(&buffer, 0, 0, width, height);
 }

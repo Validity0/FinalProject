@@ -11,7 +11,6 @@ Layer::Layer(int input_size, int output_size)
     biases.randomize(-0.5f, 0.5f);
 }
 
-Matrix Layer::forward(const Matrix& input) {
-    outputs = input.dot(weights).add(biases).apply(sigmoid);
-    return outputs;
+Matrix Layer::forward(const Matrix& input) const {
+    return input.dot(weights).add(biases).apply(sigmoid);
 }
