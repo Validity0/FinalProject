@@ -10,13 +10,24 @@ private:
     int rotationAngle;
     int targetAngle;
     void addVelocity(const Vector2D);
-    void checkRotation();
 
 public:
     SpaceShip();
-    Vector2D getVelocity() const { return velocity; };
-    int getRotationAngle() const { return rotationAngle; };
-    void setRotationAngle(double angle) { rotationAngle = angle; };
+    Vector2D getVelocity() const { return velocity; }
+    void setVelocity(Vector2D vel) { velocity = vel; }
+    int getRotationAngle() const { return rotationAngle; }
+    void setRotationAngle(double angle) { rotationAngle = angle; }
+    Vector2D getPosition() const { return pos; }
+    void setPosition(Vector2D newPos) { pos = newPos; }
+
+    // Update position based on velocity
+    void updatePosition();
+
+    // Clamp velocity to max speed
+    void clampVelocity(float maxSpeed);
+
+    // Apply friction/drag
+    void applyDrag(float factor);
 
     //Applies force in the ship’s facing direction (forward backward)
     //#00

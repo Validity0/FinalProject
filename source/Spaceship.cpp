@@ -1,4 +1,4 @@
-#include "Spaceship.h"
+#include "SpaceShip.h"
 #include <math.h>
 
 #ifndef M_PI
@@ -27,8 +27,6 @@ SpaceShip::SpaceShip()
     pos = Vector2D();
     velocity = Vector2D();
     rotationAngle = 0;
-
-    // Add spaceship to GDI+
 }
 
 void SpaceShip::addVelocity(Vector2D vel)
@@ -47,9 +45,6 @@ void SpaceShip::thrust(const double power)
 
     Vector2D newVelocity(a, b);
     addVelocity(newVelocity);
-
-    std::cout << "Thrust angle: " << rotationAngle
-              << " | Velocity: " << velocity.print() << "\n";
 }
 
 
@@ -58,10 +53,9 @@ void SpaceShip::thrust(const double power)
 bool SpaceShip::brake(int speed = 0)
 {
     if(abs(velocity.getX() - speed) < 1 && abs(velocity.getY() - speed) < 1){
-        std::cout << "Done";
         return true;
     }
-    int x = 0; 
+    int x = 0;
     int y = 0;
     if (abs(velocity.getY() - speed) > 0)
     {
@@ -71,14 +65,12 @@ bool SpaceShip::brake(int speed = 0)
     {
         x = (velocity.getX() < speed) ? 1 : -1;
     }
-    std::cout << "(" << x << ", " << y << ") " << velocity.print() << std::endl;
     velocity.add(Vector2D(x, y));
     return false;
 }
 
 bool SpaceShip::rotate(const double targetAngle)
 {
-    std::cout << rotationAngle << " This is debug";
     if (abs(rotationAngle - targetAngle) > 6)
     {
         (rotationAngle < targetAngle) ? (rotationAngle += 5) : (rotationAngle -= 5);
@@ -103,7 +95,23 @@ void SpaceShip::strafe(int direction, const double power)
 
     Vector2D newVelocity(a, b);
     addVelocity(newVelocity);
+}
 
-    std::cout << "Strafe angle: " << rotationAngle
-              << " | Velocity: " << velocity.print() << "\n";
+void SpaceShip::updatePosition()
+{
+    pos.add(velocity);
+}
+
+void SpaceShip::clampVelocity(float maxSpeed)
+{
+    float speed = std::sqrt(velocity.getX() * velocity.getX() + velocity.getY() * velocity.getY());
+    if (speed > maxSpeed) {
+        float scale = maxSpeed / speed;
+        velocity = Vector2D(velocity.getX() * scale, velocity.getY() * scale);
+    }
+}
+
+void SpaceShip::applyDrag(float factor)
+{
+    velocity = Vector2D(velocity.getX() * factor, velocity.getY() * factor);
 }

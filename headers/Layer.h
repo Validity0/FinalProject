@@ -8,5 +8,5 @@ public:
     Matrix outputs;
 
     Layer(int input_size, int output_size);
-    Matrix forward(const Matrix& input);
+    Matrix forward(const Matrix& input) const;
 };
