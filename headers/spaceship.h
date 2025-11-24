@@ -1,32 +1,38 @@
 #pragma once
 #include <vector>
-#include "Velocity.h"
-#include "Direction.h"
-
-using namespace std;
+#include <iostream>
+#include "Vector2D.h"
 
 class SpaceShip {
 private:
-    position pos;
-    Velocity velocity;
-    double rotationAngle;
-    double targetAngle;
-    void addVelocity(const Velocity);
+    Vector2D pos;
+    Vector2D velocity;
+    int rotationAngle;
+    int targetAngle;
+    void addVelocity(const Vector2D);
     void checkRotation();
 
 public:
     SpaceShip();
+    Vector2D getVelocity() const { return velocity; };
+    int getRotationAngle() const { return rotationAngle; };
+    void setRotationAngle(double angle) { rotationAngle = angle; };
 
     //Applies force in the ship’s facing direction (forward backward)
-    void thrust(const ThrustDirection direction, const double power, const int seconds);
+    //#00
+    void thrust(const double power);
 
-    //Reduces velocity magnitude
-    void brake(const Velocity targetVelocity);
+    //Reduces Vector2D magnitude
+    //#01
+    bool brake(const int speed);
 
-    //Changes facing angle, not velocity
-    void rotate(const double toAngle);
+    //Rotates ship to target angle
+    //Does not rotate velocity
+    //#02
+    bool rotate(const double toAngle);
 
     //Applies lateral force perpendicular to facing direction (left right)
-    void strafe(const RotateDirection);
+    //#03
+    void strafe(const int direction, const double power);
     
 };
