@@ -273,7 +273,8 @@ void GameLogic::applyAIDecision(
         ship.strafe(strafeVal > 0 ? 1 : -1, std::abs(strafeVal) * STRAFE_POWER);
     }
 
-    if (std::abs(rotationVal) > 0.05f) {
+    // Dead zone: -0.3 to 0.3 = go straight, outside that range = turn
+    if (std::abs(rotationVal) > 0.3f) {
         ship.setRotationAngle(ship.getRotationAngle() + rotationVal * 6.0);
     }
 
