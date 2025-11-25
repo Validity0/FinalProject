@@ -29,4 +29,8 @@ public:
 
     // Calculate loss for evaluation
     float calculateLoss(const std::vector<TrainingExample>& examples) const;
+
+    // Blend weights from another network into this one
+    // blendRatio: 0.0 = keep this network, 1.0 = fully replace with other
+    void blendWeights(const NeuralNetwork& other, float blendRatio);
 };

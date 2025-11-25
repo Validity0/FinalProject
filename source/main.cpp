@@ -1,21 +1,3 @@
-<<<<<<< HEAD
-<<<<<<< HEAD
-#define NOMINMAX
-#include <windows.h>
-#include <objidl.h>
-#include <gdiplus.h>
-#include <ctime>
-#include <thread>
-#include <iostream>
-#include "SpaceShip.h"
-
-// Action Tracking
-bool calledAction{false};
-std::vector<int> action; // {type, p1, p2, cooldownMs}
-std::chrono::steady_clock::time_point nextActionTime = std::chrono::steady_clock::now();
-
-// Player position
-=======
 #include <iostream>
 #include <vector>
 #include <random>
@@ -41,7 +23,6 @@ const int STATION_X = WINDOW_WIDTH / 2;
 const int STATION_Y = WINDOW_HEIGHT / 2;
 
 // ========== GAME STATE ==========
->>>>>>> 6136be3 (Neural network AI training system with unified physics)
 SpaceShip ship;
 SpaceStation station(STATION_X, STATION_Y);
 std::vector<Bullet> enemyBullets;
@@ -55,120 +36,6 @@ const float BULLET_SPEED = 3.0f;
 double playerX = 100;
 double playerY = 100;
 
-<<<<<<< HEAD
-// Track keys being pressed
-bool keys[256] = {false};
-
-// Flag to run the game loop
-bool running = true;
-
-// Global GDI+ objects
-ULONG_PTR gdiplusToken;
-Gdiplus::GdiplusStartupInput gdiplusStartupInput;
-Gdiplus::Image *shipIdle = nullptr;
-
-// Forward declare draw function
-void Draw(HDC hdc, int width, int height);
-
-void getShipAction(HWND hwnd)
-{
-    auto now = std::chrono::steady_clock::now();
-
-    if (!calledAction && now >= nextActionTime)
-    {
-        if (keys['A'])
-        {
-            calledAction = true;
-            action = {3, -1, 1, 150}; // dynamic cooldown
-            nextActionTime = now + std::chrono::milliseconds(action[3]);
-        }
-        else if (keys['D'])
-        {
-            calledAction = true;
-            action = {3, 1, 1, 150};
-            nextActionTime = now + std::chrono::milliseconds(action[3]);
-        }
-        else if (keys['W'])
-        {
-            calledAction = true;
-            action = {0, 1, 400};
-            nextActionTime = now + std::chrono::milliseconds(action[3]);
-        }
-        else if (keys['S'])
-        {
-            calledAction = true;
-            action = {1, 0};
-        }
-        else if (keys['Q'])
-        {   
-            calledAction = true;
-            action = {2, ship.getRotationAngle() - 15};
-        }
-        else if (keys['E'])
-        {
-            calledAction = true;
-            action = {2, ship.getRotationAngle() + 15};
-        }
-    }
-    else if (calledAction)
-    {
-        bool actionIsDone = false;
-
-        switch (action[0])
-        {
-        case 0: // thrust
-            actionIsDone = true;
-            ship.thrust(action[1]);
-            break;
-        case 1: // brake
-            actionIsDone = ship.brake(action[1]);
-            break;
-        case 2: // rotate
-            actionIsDone = ship.rotate(action[1]);
-            break;
-        case 3: // strafe
-            actionIsDone = true;
-            ship.strafe(action[1], action[2]);
-            break;
-        }
-
-        // End the action when its dynamic cooldown expires
-        if (now >= nextActionTime && actionIsDone)
-        {
-            calledAction = false;
-        }
-    }
-
-    // --- Update position using velocity ---
-
-    HDC hdc = GetDC(hwnd);
-    RECT rect;
-    GetClientRect(hwnd, &rect);
-    int width = rect.right - rect.left;
-    int height = rect.bottom - rect.top;
-
-    // --- Wrap horizontally ---
-    if (playerX < 0)
-        playerX = width;
-    else if (playerX > width)
-        playerX = 0;
-
-    // --- Wrap vertically ---
-    if (playerY < 0)
-        playerY = height;
-    else if (playerY > height)
-        playerY = 0;
-}
-
-void updateShipPosition()
-{
-    Vector2D velocity = ship.getVelocity(); // assume returns vector with getX(), getY()
-    double vx = velocity.getX() / 10.0;
-    double vy = velocity.getY() / 10.0;
-
-    playerX += vx;
-    playerY += vy;
-=======
 bool gameRunning = true;
 bool gameWon = false;
 bool gameLost = false;
@@ -229,27 +96,10 @@ void updateEnemyBullets()
             }),
         enemyBullets.end()
     );
->>>>>>> 6136be3 (Neural network AI training system with unified physics)
 }
 
 void updateStationFire()
 {
-<<<<<<< HEAD
-    switch (msg)
-    {
-    case WM_KEYDOWN:
-        keys[wParam] = true;
-        break;
-    case WM_KEYUP:
-        keys[wParam] = false;
-        break;
-    case WM_DESTROY:
-        running = false;
-        PostQuitMessage(0);
-        break;
-    default:
-        return DefWindowProc(hwnd, msg, wParam, lParam);
-=======
     // Use same counter logic as training simulation
     bulletFireCounter++;
     if (bulletFireCounter > BULLET_FIRE_RATE) {
@@ -268,18 +118,11 @@ void updateStationFire()
         }
 
         bulletFireCounter = 0;
->>>>>>> 6136be3 (Neural network AI training system with unified physics)
     }
 }
 
 void checkWinCondition()
 {
-<<<<<<< HEAD
-
-    // Initialize GDI+
-    GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, nullptr);
-    shipIdle = new Gdiplus::Image(L"Images/shipIdle.png"); // Load your image here
-=======
     Vector2D stationPos = station.getPosition();
     double dx = playerX - stationPos.getX();
     double dy = playerY - stationPos.getY();
@@ -292,7 +135,6 @@ void checkWinCondition()
         gameRunning = false;
     }
 }
->>>>>>> 6136be3 (Neural network AI training system with unified physics)
 
 void processAIAction(float thrustVal, float strafeVal, float rotationVal, float brakeVal)
 {
@@ -302,32 +144,6 @@ void processAIAction(float thrustVal, float strafeVal, float rotationVal, float 
     rotationVal = std::max(-1.0f, std::min(1.0f, rotationVal));
     brakeVal = std::max(0.0f, std::min(1.0f, brakeVal));
 
-<<<<<<< HEAD
-    // Create window
-    HWND hwnd = CreateWindowEx(
-        0, TEXT("MyGameWindow"), TEXT("My 2D Game"),
-        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-        CW_USEDEFAULT, CW_USEDEFAULT, 800, 600,
-        NULL, NULL, hInstance, NULL);
-
-    ShowWindow(hwnd, nCmdShow);
-    UpdateWindow(hwnd);
-
-    // Main game loop (~60 FPS)
-    const int FPS = 240;
-    const int frameDelay = 1000 / FPS;
-
-    MSG msg;
-    while (running)
-    {
-        // Handle Windows messages
-        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
-        {
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
-        getShipAction(hwnd);
-=======
     // Apply using SpaceShip methods (SAME AS TRAINING SIMULATION)
     // Thrust
     if (thrustVal > 0.1f) {
@@ -511,7 +327,6 @@ void runGameMode()
         );
 
         // Update ship physics (same as training)
->>>>>>> 6136be3 (Neural network AI training system with unified physics)
         updateShipPosition();
 
         // NOW update bullets and check collisions (AFTER ship moved, same as training)
@@ -590,70 +405,8 @@ int main() {
     }
 
     // Cleanup
-<<<<<<< HEAD
-    delete shipIdle;
-    Gdiplus::GdiplusShutdown(gdiplusToken);
-    return 0;
-}
-
-// Draw everything here
-void Draw(HDC hdc, int width, int height)
-{
-    Gdiplus::Graphics graphics(hdc);
-    Gdiplus::Bitmap buffer(width, height, &graphics);
-    Gdiplus::Graphics g(&buffer);
-
-    g.Clear(Gdiplus::Color(255, 0, 0, 0));
-
-    if (shipIdle)
-    {
-        // Apply rotation around ship center
-        g.TranslateTransform(playerX + 42, playerY + 24); // center of sprite
-        g.RotateTransform(ship.getRotationAngle());
-        g.TranslateTransform(-(playerX + 42), -(playerY + 24));
-
-        g.DrawImage(shipIdle, playerX, playerY, 84, 48);
-
-        // Reset transform
-        g.ResetTransform();
-    }
-
-    graphics.DrawImage(&buffer, 0, 0, width, height);
-}
-=======
-#include "NeuralNetwork.h"
-#include <iostream>
-
-using namespace std;
-
-int main() {
-    NeuralNetwork nn({3, 4, 4, 1});
-
-    // One training example
-    Matrix input(1, 3);
-    input.data[0] = {0.9f, 0.3f, -0.7f}; // spaceship environment
-
-    Matrix target(1, 1);
-    target.data[0] = {1.0f}; // correct answer: thrust left
-
-    float learningRate = 0.2f;
-
-    // Training loop
-    for (int i = 0; i < 10; ++i) {
-        nn.train(input, target, learningRate);
-
-        Matrix prediction = nn.predict(input);
-        std::cout << "Step " << i + 1 << " prediction: ";
-        prediction.print();
-    }
-
-    return 0;
-}
->>>>>>> 2358869 (Neural Network 1.0)
-=======
     delete aiController;
 
     std::cout << "Program complete." << std::endl;
     return 0;
 }
->>>>>>> 6136be3 (Neural network AI training system with unified physics)
