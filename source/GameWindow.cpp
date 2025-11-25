@@ -154,7 +154,7 @@ Gdiplus::Image* GameWindow::getShipImage(ShipState state)
     }
 }
 
-void GameWindow::render(double shipX, double shipY, const SpaceStation& station,
+void GameWindow::render(double shipX, double shipY, float shipRotation, const SpaceStation& station,
                         const std::vector<Bullet>& bullets, int frameCount, const std::string& status,
                         ShipState shipState)
 {
@@ -178,21 +178,43 @@ void GameWindow::render(double shipX, double shipY, const SpaceStation& station,
     Gdiplus::Pen healthPen(Gdiplus::Color(255, 0, 0), 2);
     graphics.DrawRectangle(&healthPen, (INT)(stationPos.getX() - 35), (INT)(stationPos.getY() - 40), 70, 10);
 
-    // Draw ship sprite
+    // Draw ship sprite with rotation
     Gdiplus::Image* shipImage = getShipImage(shipState);
     if (shipImage && shipImage->GetLastStatus() == Gdiplus::Ok) {
-        graphics.DrawImage(shipImage, (INT)(shipX - 16), (INT)(shipY - 16), 32, 32);
+        // Save graphics state
+        Gdiplus::GraphicsState state = graphics.Save();
+
+        // Translate to ship center, rotate, then draw centered
+        graphics.TranslateTransform((Gdiplus::REAL)shipX, (Gdiplus::REAL)shipY);
+        graphics.RotateTransform(shipRotation);
+        graphics.DrawImage(shipImage, -16, -16, 32, 32);
+
+        // Restore graphics state
+        graphics.Restore(state);
     } else {
-        // Fallback to circle if image fails to load
+        // Fallback to triangle if image fails to load (shows rotation)
+        Gdiplus::GraphicsState state = graphics.Save();
+        graphics.TranslateTransform((Gdiplus::REAL)shipX, (Gdiplus::REAL)shipY);
+        graphics.RotateTransform(shipRotation);
+
+        // Draw triangle pointing up (will be rotated)
+        Gdiplus::Point points[3] = {
+            Gdiplus::Point(0, -12),   // Top
+            Gdiplus::Point(-8, 10),   // Bottom left
+            Gdiplus::Point(8, 10)     // Bottom right
+        };
         Gdiplus::SolidBrush shipBrush(Gdiplus::Color(0, 255, 0));
-        graphics.FillEllipse(&shipBrush, (INT)(shipX - 10), (INT)(shipY - 10), 20, 20);
+        graphics.FillPolygon(&shipBrush, points, 3);
+
+        graphics.Restore(state);
     }
 
-    // Draw bullets
+    // Draw bullets (size matches collision radius of 35)
     Gdiplus::SolidBrush bulletBrush(Gdiplus::Color(255, 100, 100));
+    const int BULLET_RADIUS = 17;  // Half of collision radius 35
     for (const auto& bullet : bullets) {
         Vector2D bPos = bullet.getPosition();
-        graphics.FillEllipse(&bulletBrush, (INT)(bPos.getX() - 3), (INT)(bPos.getY() - 3), 6, 6);
+        graphics.FillEllipse(&bulletBrush, (INT)(bPos.getX() - BULLET_RADIUS), (INT)(bPos.getY() - BULLET_RADIUS), BULLET_RADIUS * 2, BULLET_RADIUS * 2);
     }
 
     // Draw UI text

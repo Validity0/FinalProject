@@ -8,9 +8,17 @@ static float dsigmoid(float y) {
     return y * (1.0f - y);
 }
 
+// Derivative of tanh
+static float dtanh(float y) {
+    return 1.0f - y * y;
+}
+
 NeuralNetwork::NeuralNetwork(const std::vector<int>& sizes) {
-    for (size_t i = 1; i < sizes.size(); ++i)
-        layers.emplace_back(sizes[i - 1], sizes[i]);
+    for (size_t i = 1; i < sizes.size(); ++i) {
+        // Use tanh for output layer (last layer), sigmoid for hidden layers
+        bool isOutputLayer = (i == sizes.size() - 1);
+        layers.emplace_back(sizes[i - 1], sizes[i], isOutputLayer);
+    }
 }
 
 Matrix NeuralNetwork::predict(const Matrix& input) const {
@@ -42,8 +50,10 @@ void NeuralNetwork::train(const Matrix& input, const Matrix& target, float learn
 
     // Backpropagate through layers in reverse
     for (int l = numLayers - 1; l >= 0; --l) {
-        // Gradient for current layer
-        Matrix gradient = layerOutputs[l + 1].apply(dsigmoid);
+        // Gradient for current layer - use correct derivative based on activation
+        Matrix gradient = layers[l].useTanh
+            ? layerOutputs[l + 1].apply(dtanh)
+            : layerOutputs[l + 1].apply(dsigmoid);
         for (int i = 0; i < gradient.rows; ++i)
             for (int j = 0; j < gradient.cols; ++j)
                 gradient.data[i][j] *= error.data[i][j] * learningRate;
@@ -228,5 +238,33 @@ bool NeuralNetwork::loadModel(const std::string& filename, bool verbose) {
         std::cout << "Model loaded from: " << filename << std::endl;
     }
     return true;
+}
+
+void NeuralNetwork::blendWeights(const NeuralNetwork& other, float blendRatio) {
+    // Blend weights: this = this * (1 - ratio) + other * ratio
+    if (layers.size() != other.layers.size()) {
+        std::cerr << "Error: Cannot blend networks with different layer counts" << std::endl;
+        return;
+    }
+
+    for (size_t l = 0; l < layers.size(); ++l) {
+        // Blend weights
+        for (int i = 0; i < layers[l].weights.rows; ++i) {
+            for (int j = 0; j < layers[l].weights.cols; ++j) {
+                layers[l].weights.data[i][j] =
+                    layers[l].weights.data[i][j] * (1.0f - blendRatio) +
+                    other.layers[l].weights.data[i][j] * blendRatio;
+            }
+        }
+
+        // Blend biases
+        for (int i = 0; i < layers[l].biases.rows; ++i) {
+            for (int j = 0; j < layers[l].biases.cols; ++j) {
+                layers[l].biases.data[i][j] =
+                    layers[l].biases.data[i][j] * (1.0f - blendRatio) +
+                    other.layers[l].biases.data[i][j] * blendRatio;
+            }
+        }
+    }
 }
 

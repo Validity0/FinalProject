@@ -1,5 +1,7 @@
 #include "TrainingManager.h"
 #include "SpaceShip.h"
+#include "GameSettings.h"
+#include "GameLogic.h"
 #include <iostream>
 #include <fstream>
 #include <random>
@@ -7,15 +9,7 @@
 #include <limits>
 #include <chrono>
 #include <cmath>
-
-// Game parameters for training data (MUST MATCH main.cpp)
-const int WINDOW_WIDTH = 800;
-const int WINDOW_HEIGHT = 600;
-const int STATION_X = WINDOW_WIDTH / 2;
-const int STATION_Y = WINDOW_HEIGHT / 2;
-const float MAX_SPEED = 5.0f;
-const int BULLET_FIRE_RATE = 20;
-const float BULLET_SPEED = 3.0f;
+#include <conio.h>
 
 TrainingManager::TrainingManager(NeuralNetwork* nn)
     : network(nn), bestLoss(std::numeric_limits<float>::max()), bestBatch(0), totalBatches(0)
@@ -72,18 +66,66 @@ std::vector<TrainingExample> TrainingManager::generateBatchData(int numExamples)
         };
 
         // Target 4 outputs: thrust, strafe, rotation, brake
-        // Use heuristic: move toward station, avoid bullets
-        float targetThrust = (stationDist > 0.3f) ? 0.7f : 0.2f;
-        float targetStrafe = std::sin(stationAngle) * 0.5f;
-        float targetRotation = stationAngle;  // Stronger rotation signal
-        float targetBrake = (closestBulletDist < 0.3f) ? 0.8f : 0.0f;
+        // IMPORTANT: Sigmoid outputs 0-1, so targets must be 0-1
+        // After transformation in simulation: (output - 0.5) * 2 gives -1 to +1
+        // So: target 0.0 = -1 (full left), 0.5 = 0 (neutral), 1.0 = +1 (full right)
+
+        float targetThrust = 0.5f;  // Default moderate thrust
+        float strafeRaw = 0.0f;
+        float rotationRaw = 0.0f;
+        float targetBrake = 0.0f;
+
+        // PRIORITY 1: Bullet avoidance when bullet is close
+        if (closestBulletDist < 0.4f) {
+            // Bullet is dangerous! Strafe perpendicular to bullet direction
+            float bulletAngleRad = closestBulletAngle * 3.14159f;
+            float perpAngle = bulletAngleRad + 1.5708f;  // Add 90 degrees
+
+            // Strafe away from bullet path
+            strafeRaw = std::sin(perpAngle);
+
+            // Rotate away from bullet - ensure full range coverage
+            rotationRaw = -closestBulletAngle;  // This gives -1 to +1 range
+
+            // Thrust to escape
+            targetThrust = 0.8f;
+            targetBrake = 0.0f;
+        }
+        // PRIORITY 2: Move toward station when safe
+        else {
+            targetThrust = (stationDist > 0.3f) ? 0.7f : 0.3f;
+            strafeRaw = std::sin(stationAngle * 3.14159f) * 0.5f;
+
+            // stationAngle is already -1 to +1 (divided by pi earlier)
+            // Use it directly for rotation - this tells AI to turn toward station
+            rotationRaw = stationAngle;
+
+            targetBrake = (stationDist < 0.2f) ? 0.5f : 0.0f;
+        }
+
+        // Force balanced rotation in training data
+        // 25% forced negative, 25% forced positive, 50% natural
+        float rotationRoll = dist(rng);
+        if (rotationRoll < 0.25f) {
+            rotationRaw = -std::abs(rotationRaw);  // Force negative
+            if (rotationRaw > -0.3f) rotationRaw = -0.5f;
+        } else if (rotationRoll < 0.5f) {
+            rotationRaw = std::abs(rotationRaw);   // Force positive
+            if (rotationRaw < 0.3f) rotationRaw = 0.5f;
+        }
+
+        // Tanh outputs -1 to +1 directly, no conversion needed for strafe/rotation
+        // Thrust and brake need to be mapped: tanh output -1 to +1 -> 0 to 1
+        // So we store them as -1 to +1 and convert after prediction
+        float targetThrustTanh = targetThrust * 2.0f - 1.0f;  // 0-1 -> -1 to +1
+        float targetBrakeTanh = targetBrake * 2.0f - 1.0f;    // 0-1 -> -1 to +1
 
         example.target = Matrix(1, 4);
         example.target.data[0] = {
-            std::max(0.0f, std::min(1.0f, targetThrust)),
-            std::max(-1.0f, std::min(1.0f, targetStrafe)),
-            std::max(-1.0f, std::min(1.0f, targetRotation)),
-            std::max(0.0f, std::min(1.0f, targetBrake))
+            std::max(-1.0f, std::min(1.0f, targetThrustTanh)),   // -1 to +1 (tanh)
+            std::max(-1.0f, std::min(1.0f, strafeRaw)),          // -1 to +1 (tanh)
+            std::max(-1.0f, std::min(1.0f, rotationRaw)),        // -1 to +1 (tanh)
+            std::max(-1.0f, std::min(1.0f, targetBrakeTanh))     // -1 to +1 (tanh)
         };
 
         examples.push_back(example);
@@ -111,6 +153,9 @@ void TrainingManager::initializeTrainingState()
     std::cout << "  Examples per batch: " << EXAMPLES_PER_BATCH << std::endl;
     std::cout << "  Learning rate: " << LEARNING_RATE << std::endl;
     std::cout << "  Progress update: every " << DISPLAY_INTERVAL_BATCHES << " batches" << std::endl;
+    std::cout << "  Validation: " << VALIDATION_REQUIRED_WINS << "/" << VALIDATION_TESTS << " wins required to save" << std::endl;
+    std::cout << "======================================" << std::endl;
+    std::cout << "  Press 'Q' to stop and save best model" << std::endl;
     std::cout << "======================================\n" << std::endl;
 
     // Initialize log file
@@ -175,236 +220,34 @@ void TrainingManager::updateBestModel(float validationLoss)
 
 float TrainingManager::simulateGameFitness(int simulationFrames)
 {
-    // Simulate actual gameplay using SpaceShip class (SAME AS GAME MODE)
-    SpaceShip ship;
-
-    // Randomize starting position along edges (SAME AS GAME MODE)
-    static std::mt19937 rng(std::random_device{}());
-    std::uniform_int_distribution<int> edgePicker(0, 3);  // 0=top, 1=bottom, 2=left, 3=right
-    std::uniform_real_distribution<double> distX(50.0, WINDOW_WIDTH - 50.0);
-    std::uniform_real_distribution<double> distY(50.0, WINDOW_HEIGHT - 50.0);
-
-    double stationX = WINDOW_WIDTH / 2.0;
-    double stationY = WINDOW_HEIGHT / 2.0;
-
-    // Spawn along a random edge
-    double startX, startY;
-    int edge = edgePicker(rng);
-    switch (edge) {
-        case 0:  // Top edge
-            startX = distX(rng);
-            startY = 50.0;
-            break;
-        case 1:  // Bottom edge
-            startX = distX(rng);
-            startY = WINDOW_HEIGHT - 50.0;
-            break;
-        case 2:  // Left edge
-            startX = 50.0;
-            startY = distY(rng);
-            break;
-        case 3:  // Right edge
-            startX = WINDOW_WIDTH - 50.0;
-            startY = distY(rng);
-            break;
-    }
-
-    ship.setPosition(Vector2D(startX, startY));
-
-    float totalLoss = 0.0f;
-    float previousDistance = std::sqrt((stationX - startX) * (stationX - startX) +
-                                        (stationY - startY) * (stationY - startY));
-    bool aiWon = false;
-    bool aiHit = false;
-
-    // Bullet simulation
-    std::vector<std::pair<double, double>> bullets;
-    std::vector<std::pair<float, float>> bulletVels;
-    int bulletFireCounter = 0;
-
-    for (int frame = 0; frame < simulationFrames; ++frame) {
-        Vector2D shipPos = ship.getPosition();
-        double shipX = shipPos.getX();
-        double shipY = shipPos.getY();
-
-        // Fire bullets from station periodically (SAME RATE AS GAME)
-        bulletFireCounter++;
-        if (bulletFireCounter > BULLET_FIRE_RATE) {
-            double dx = shipX - stationX;
-            double dy = shipY - stationY;
-            double distance = std::sqrt(dx * dx + dy * dy);
-
-            if (distance > 0) {
-                float velX = (dx / distance) * BULLET_SPEED;
-                float velY = (dy / distance) * BULLET_SPEED;
-                bullets.push_back({stationX, stationY});
-                bulletVels.push_back({velX, velY});
-                bulletFireCounter = 0;
-            }
-        }
-
-        // Update bullets
-        for (size_t i = 0; i < bullets.size(); ++i) {
-            bullets[i].first += bulletVels[i].first;
-            bullets[i].second += bulletVels[i].second;
-
-            // Check collision with ship
-            double bx = bullets[i].first - shipX;
-            double by = bullets[i].second - shipY;
-            double bulletDist = std::sqrt(bx * bx + by * by);
-
-            if (bulletDist < 20.0) {
-                // GAME OVER on hit - same as real game!
-                aiHit = true;
-                totalLoss += 10.0f;  // Heavy penalty
-                // End simulation immediately like the real game
-                break;
-            }
-        }
-
-        // If hit, end simulation (same as game)
-        if (aiHit) break;
-
-        // Remove off-screen bullets
-        for (size_t i = 0; i < bullets.size(); ++i) {
-            if (bullets[i].first < -50 || bullets[i].first > WINDOW_WIDTH + 50 ||
-                bullets[i].second < -50 || bullets[i].second > WINDOW_HEIGHT + 50) {
-                bullets.erase(bullets.begin() + i);
-                bulletVels.erase(bulletVels.begin() + i);
-                i--;
-            }
-        }
-
-        // Create game state (EXACTLY MATCHES GAME MODE)
-        double stationDx = stationX - shipX;
-        double stationDy = stationY - shipY;
-        float stDist = std::sqrt(stationDx * stationDx + stationDy * stationDy);
-        float stAngle = std::atan2(stationDy, stationDx);
-
-        // Find closest bullet
-        float closestBDist = 1000.0f;
-        float closestBAngle = 0.0f;
-        float closestBVelX = 0.0f;
-        float closestBVelY = 0.0f;
-
-        for (size_t i = 0; i < bullets.size(); ++i) {
-            double bdx = bullets[i].first - shipX;
-            double bdy = bullets[i].second - shipY;
-            float bDist = std::sqrt(bdx * bdx + bdy * bdy);
-
-            if (bDist < closestBDist) {
-                closestBDist = bDist;
-                closestBAngle = std::atan2(bdy, bdx);
-                closestBVelX = bulletVels[i].first;
-                closestBVelY = bulletVels[i].second;
-            }
-        }
-
-        Vector2D vel = ship.getVelocity();
-        Matrix gameState(1, 12);
-        gameState.data[0] = {
-            static_cast<float>(shipX / WINDOW_WIDTH),              // 0: Ship X
-            static_cast<float>(shipY / WINDOW_HEIGHT),             // 1: Ship Y
-            static_cast<float>(vel.getX() / 10.0f),                // 2: Ship velocity X
-            static_cast<float>(vel.getY() / 10.0f),                // 3: Ship velocity Y
-            0.0f,                                                   // 4: Ship rotation
-            static_cast<float>(stDist / 500.0f),                   // 5: Station distance
-            static_cast<float>(stAngle / 3.14159f),                // 6: Station angle
-            static_cast<float>(closestBDist / 500.0f),             // 7: Closest bullet distance
-            static_cast<float>(closestBAngle / 3.14159f),          // 8: Closest bullet angle
-            closestBVelX / 10.0f,                                   // 9: Closest bullet vel X
-            closestBVelY / 10.0f,                                   // 10: Closest bullet vel Y
-            static_cast<float>(bullets.size() / 10.0f)             // 11: Number of bullets
-        };
-
-        // Get AI decision
-        Matrix decision = network->predict(gameState);
-
-        // Extract outputs and apply using SpaceShip methods (SAME AS GAME MODE)
-        float thrustVal = std::max(0.0f, std::min(1.0f, decision.data[0][0]));
-        float strafeVal = std::max(-1.0f, std::min(1.0f, decision.data[0][1]));
-        float rotationVal = std::max(-1.0f, std::min(1.0f, decision.data[0][2]));
-        float brakeVal = std::max(0.0f, std::min(1.0f, decision.data[0][3]));
-
-        // Apply thrust using SpaceShip method
-        if (thrustVal > 0.1f) {
-            ship.thrust(thrustVal * 0.5);
-        }
-
-        // Apply strafe using SpaceShip method
-        if (std::abs(strafeVal) > 0.1f) {
-            ship.strafe(strafeVal > 0 ? 1 : -1, std::abs(strafeVal) * 0.3);
-        }
-
-        // Apply rotation using SpaceShip method
-        if (std::abs(rotationVal) > 0.05f) {
-            ship.setRotationAngle(ship.getRotationAngle() + rotationVal * 6.0);
-        }
-
-        // Apply brake
-        if (brakeVal > 0.1f) {
-            ship.applyDrag(1.0f - brakeVal * 0.1f);
-        }
-
-        // Clamp velocity and update position
-        ship.clampVelocity(MAX_SPEED);
-        ship.updatePosition();
-
-        // Wrap around screen
-        shipPos = ship.getPosition();
-        shipX = shipPos.getX();
-        shipY = shipPos.getY();
-        if (shipX < 0) shipX = WINDOW_WIDTH;
-        else if (shipX > WINDOW_WIDTH) shipX = 0;
-        if (shipY < 0) shipY = WINDOW_HEIGHT;
-        else if (shipY > WINDOW_HEIGHT) shipY = 0;
-        ship.setPosition(Vector2D(shipX, shipY));
-
-        // Calculate distance to station
-        double dx = stationX - shipX;
-        double dy = stationY - shipY;
-        float currentDistance = std::sqrt(dx * dx + dy * dy);
-
-        // Time penalty - every frame costs something (encourages fast completion)
-        totalLoss += 0.02f;
-
-        // Reward for moving closer to station
-        // If distance decreased, reward (negative loss). If it increased, penalty (positive loss)
-        float distanceChange = currentDistance - previousDistance;
-        if (distanceChange < 0) {
-            // Getting closer = good
-            totalLoss += distanceChange * 0.01f; // Negative = reward
-        } else {
-            // Getting farther = bad
-            totalLoss += distanceChange * 0.02f; // Positive = penalty (higher weight)
-        }
-
-        // Bonus for being very close
-        if (currentDistance < 100.0f) {
-            totalLoss -= 0.1f; // Small continuous reward for proximity
-        }
-
-        // Win condition
-        if (currentDistance < 50.0f) {
-            totalLoss -= 5.0f; // Big reward for reaching (increased)
-            aiWon = true;
-            break;
-        }
-
-        previousDistance = currentDistance;
-    }
+    // Use shared GameLogic for consistent behavior with game mode
+    SimulationResult result = GameLogic::runSimulation(network, simulationFrames);
 
     // Store results for reporting
-    lastSimWon = aiWon;
-    lastSimHit = aiHit;
+    lastSimWon = result.won;
+    lastSimHit = result.hit;
 
-    // Timeout penalty - if didn't win, add penalty based on final distance
-    if (!aiWon && !aiHit) {
-        totalLoss += previousDistance * 0.01f;  // Penalty for how far away when time ran out
+    return result.totalLoss;
+}
+
+bool TrainingManager::validateModel(int numTests, int requiredWins, int maxFrames)
+{
+    int wins = 0;
+    int hits = 0;
+    float totalLoss = 0.0f;
+
+    for (int i = 0; i < numTests; ++i) {
+        SimulationResult result = GameLogic::runSimulation(network, maxFrames);
+        if (result.won) wins++;
+        if (result.hit) hits++;
+        totalLoss += result.totalLoss;
     }
 
-    // Return loss (lower = better, can be negative for very good performance)
-    return totalLoss;
+    float avgLoss = totalLoss / numTests;
+    std::cout << "  Validation: " << wins << "/" << numTests << " wins, "
+              << hits << " hits, avg loss: " << std::fixed << std::setprecision(2) << avgLoss;
+
+    return wins >= requiredWins;
 }
 
 void TrainingManager::train()
@@ -422,7 +265,18 @@ void TrainingManager::train()
     auto startTime = std::chrono::high_resolution_clock::now();
     auto lastDisplayTime = startTime;
 
+    bool stoppedEarly = false;
     while (true) {
+        // Check for early stop (Q key)
+        if (_kbhit()) {
+            char key = _getch();
+            if (key == 'q' || key == 'Q') {
+                std::cout << "\n*** Stopping early - saving best model... ***\n";
+                stoppedEarly = true;
+                break;
+            }
+        }
+
         auto currentTime = std::chrono::high_resolution_clock::now();
         auto elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(currentTime - startTime).count();
 
@@ -445,43 +299,54 @@ void TrainingManager::train()
         bool showGameFitness = false;
 
         // Periodically evaluate using actual game simulation
-        if (totalBatches % 20 == 0) {
-            gameFitness = simulateGameFitness(500);
+        if (totalBatches % 100 == 0) {  // Evaluate less often for faster training
+            gameFitness = simulateGameFitness(MAX_FRAMES);
             showGameFitness = true;
 
             if (lastSimWon) {
-                // This model won!
-                if (!hasWinningModel) {
-                    // First winning model - save it regardless of loss
-                    hasWinningModel = true;
-                    bestWinLoss = gameFitness;
-                    bestLoss = gameFitness;
-                    bestBatch = totalBatches;
-                    network->saveModel("best_model.nn", false);
-                    improvement = 1.0f;
-                    evalMethod = "WIN (first!)";
-                } else if (gameFitness < bestWinLoss) {
-                    // Multiple wins - only save if lower loss than previous winners
-                    improvement = bestWinLoss - gameFitness;
-                    bestWinLoss = gameFitness;
-                    bestLoss = gameFitness;
-                    bestBatch = totalBatches;
-                    network->saveModel("best_model.nn", false);
-                    evalMethod = "WIN (better)";
+                // This model won once - but is it consistent?
+                std::cout << "\n*** Single win detected - validating consistency... ***\n";
+                bool isConsistent = validateModel(VALIDATION_TESTS, VALIDATION_REQUIRED_WINS, VALIDATION_MAX_FRAMES);
+
+                if (isConsistent) {
+                    std::cout << " - PASSED!\n";
+                    if (!hasWinningModel) {
+                        // First validated winning model
+                        std::cout << "*** FIRST VALIDATED WIN! Saving model. ***\n";
+                        hasWinningModel = true;
+                        bestWinLoss = gameFitness;
+                        bestLoss = gameFitness;
+                        bestBatch = totalBatches;
+                        network->saveModel("best_model.nn", false);
+                        improvement = 1.0f;
+                        evalMethod = "VALIDATED WIN (first!)";
+                    } else if (gameFitness < bestWinLoss) {
+                        // Better validated winner
+                        std::cout << "*** BETTER VALIDATED WIN! " << gameFitness << " < " << bestWinLoss << " ***\n";
+                        improvement = bestWinLoss - gameFitness;
+                        bestWinLoss = gameFitness;
+                        bestLoss = gameFitness;
+                        bestBatch = totalBatches;
+                        network->saveModel("best_model.nn", false);
+                        evalMethod = "VALIDATED WIN (better)";
+                    } else {
+                        evalMethod = "VALIDATED WIN (not best)";
+                    }
                 } else {
-                    evalMethod = "WIN (not best)";
+                    std::cout << " - FAILED (lucky win)\n";
+                    evalMethod = "LUCKY WIN (rejected)";
                 }
             } else if (!hasWinningModel) {
-                // No winning model yet - save based on lowest loss
+                // No winning model yet - save based on lowest loss (temporary until we get a win)
                 if (gameFitness < bestLoss) {
                     improvement = bestLoss - gameFitness;
                     bestLoss = gameFitness;
                     bestBatch = totalBatches;
                     network->saveModel("best_model.nn", false);
-                    evalMethod = "Game";
+                    evalMethod = "Game (no win yet)";
                 }
             }
-            // If we have a winning model and this one didn't win, don't save it
+            // If we have a winning model and this one didn't win, ignore it completely
         } else if (!hasWinningModel) {
             // Between game fitness evaluations, only track validation loss if no winner yet
             if (validationLoss < bestLoss) {
@@ -498,9 +363,16 @@ void TrainingManager::train()
         auto timeSinceDisplay = std::chrono::duration_cast<std::chrono::seconds>(currentTime - lastDisplayTime).count();
         if (timeSinceDisplay >= 5 || totalBatches % DISPLAY_INTERVAL_BATCHES == 0) {
             std::cout << "Batch " << std::setw(6) << totalBatches << " | "
-                      << "Train Loss: " << std::fixed << std::setprecision(6) << batchLoss << " | "
-                      << "Best Loss: " << bestLoss << " | "
-                      << "Time: " << std::setw(2) << elapsedSeconds << "s/" << TRAINING_TIME_SECONDS << "s | ";
+                      << "Train Loss: " << std::fixed << std::setprecision(6) << batchLoss << " | ";
+
+            // Show best winning loss if we have a winner, otherwise show best overall
+            if (hasWinningModel) {
+                std::cout << "Best WIN: " << std::setprecision(2) << bestWinLoss << " | ";
+            } else {
+                std::cout << "Best: " << std::setprecision(2) << bestLoss << " (no win) | ";
+            }
+
+            std::cout << "Time: " << std::setw(3) << elapsedSeconds << "s/" << TRAINING_TIME_SECONDS << "s | ";
 
             if (improvement > 0.0f) {
                 std::cout << "Improved (" << evalMethod << ")";
@@ -509,13 +381,13 @@ void TrainingManager::train()
             }
 
             if (showGameFitness) {
-                std::cout << " | Game Fitness: " << std::fixed << std::setprecision(4) << gameFitness;
+                std::cout << " | Fitness: " << std::fixed << std::setprecision(2) << gameFitness;
                 if (lastSimWon) {
-                    std::cout << " | WIN!";
+                    std::cout << " WIN!";
                 } else if (lastSimHit) {
-                    std::cout << " | HIT";
+                    std::cout << " HIT";
                 } else {
-                    std::cout << " | TIMEOUT";
+                    std::cout << " TIMEOUT";
                 }
             }
             std::cout << std::endl;
@@ -527,7 +399,11 @@ void TrainingManager::train()
     auto totalTime = std::chrono::duration_cast<std::chrono::seconds>(endTime - startTime).count();
 
     std::cout << "\n=======================================" << std::endl;
-    std::cout << "Training Complete!" << std::endl;
+    if (stoppedEarly) {
+        std::cout << "Training Stopped Early (Q pressed)" << std::endl;
+    } else {
+        std::cout << "Training Complete!" << std::endl;
+    }
     std::cout << "=======================================" << std::endl;
     std::cout << "Total batches processed: " << totalBatches << std::endl;
     std::cout << "Total training time: " << totalTime << " seconds" << std::endl;

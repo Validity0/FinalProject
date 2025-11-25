@@ -15,12 +15,7 @@
 #include "NeuralNetwork.h"
 #include "TrainingManager.h"
 #include "GameWindow.h"
-
-// ========== GAME CONFIGURATION ==========
-const int WINDOW_WIDTH = 800;
-const int WINDOW_HEIGHT = 600;
-const int STATION_X = WINDOW_WIDTH / 2;
-const int STATION_Y = WINDOW_HEIGHT / 2;
+#include "GameSettings.h"
 
 // ========== GAME STATE ==========
 SpaceShip ship;
@@ -28,8 +23,6 @@ SpaceStation station(STATION_X, STATION_Y);
 std::vector<Bullet> enemyBullets;
 NeuralNetwork* aiController = nullptr;
 int bulletFireCounter = 0;  // Match training simulation counter
-const int BULLET_FIRE_RATE = 20;
-const float BULLET_SPEED = 3.0f;
 
 // Ship position is now stored in the ship object
 // These are updated from ship.getPosition() for convenience
@@ -72,30 +65,31 @@ void updateEnemyBullets()
     for (auto& bullet : enemyBullets) {
         bullet.update();
 
+        // Wrap bullets around screen
+        Vector2D bulletPos = bullet.getPosition();
+        double bx = bulletPos.getX();
+        double by = bulletPos.getY();
+        if (bx < 0) bx += WINDOW_WIDTH;
+        else if (bx > WINDOW_WIDTH) bx -= WINDOW_WIDTH;
+        if (by < 0) by += WINDOW_HEIGHT;
+        else if (by > WINDOW_HEIGHT) by -= WINDOW_HEIGHT;
+        bullet.setPosition(Vector2D(bx, by));
+
         // Check collision with ship
         Vector2D shipPos(playerX, playerY);
-        Vector2D bulletPos = bullet.getPosition();
+        bulletPos = bullet.getPosition();
         double dx = bulletPos.getX() - shipPos.getX();
         double dy = bulletPos.getY() - shipPos.getY();
         double distance = std::sqrt(dx * dx + dy * dy);
 
-        if (distance < 20.0) {
+        if (distance < BULLET_COLLISION_RADIUS) {
             gameLost = true;
             gameStatus = "LOST - Hit by bullet!";
             gameRunning = false;
         }
     }
 
-    // Remove off-screen bullets
-    enemyBullets.erase(
-        std::remove_if(enemyBullets.begin(), enemyBullets.end(),
-            [](const Bullet& b) {
-                Vector2D pos = b.getPosition();
-                return pos.getX() < -50 || pos.getX() > WINDOW_WIDTH + 50 ||
-                       pos.getY() < -50 || pos.getY() > WINDOW_HEIGHT + 50;
-            }),
-        enemyBullets.end()
-    );
+    // Bullets wrap now, no need to remove off-screen ones
 }
 
 void updateStationFire()
@@ -108,16 +102,33 @@ void updateStationFire()
         double dy = playerY - STATION_Y;
         double distance = std::sqrt(dx * dx + dy * dy);
 
-        if (distance > 0) {
-            double vx = (dx / distance) * BULLET_SPEED;
-            double vy = (dy / distance) * BULLET_SPEED;
+        if (distance > SAFE_ZONE_RADIUS) {
+            // Predictive shooting - aim where ship will be
+            Vector2D shipVel = ship.getVelocity();
+            double timeToHit = distance / BULLET_SPEED;
+            // Cap prediction time to prevent overshooting
+            if (timeToHit > 60.0) timeToHit = 60.0;
 
-            Vector2D stationPos(STATION_X, STATION_Y);
-            Vector2D bulletVel(vx, vy);
-            enemyBullets.push_back(Bullet(stationPos, bulletVel, &ship));
+            // Predict future position
+            double predictedX = playerX + shipVel.getX() * timeToHit * BULLET_PREDICTION_FACTOR;
+            double predictedY = playerY + shipVel.getY() * timeToHit * BULLET_PREDICTION_FACTOR;
+
+            // Aim at predicted position
+            double pdx = predictedX - STATION_X;
+            double pdy = predictedY - STATION_Y;
+            double pDist = std::sqrt(pdx * pdx + pdy * pdy);
+
+            if (pDist > 0) {
+                double vx = (pdx / pDist) * BULLET_SPEED;
+                double vy = (pdy / pDist) * BULLET_SPEED;
+
+                Vector2D stationPos(STATION_X, STATION_Y);
+                Vector2D bulletVel(vx, vy);
+                enemyBullets.push_back(Bullet(stationPos, bulletVel, &ship));
+            }
+
+            bulletFireCounter = 0;
         }
-
-        bulletFireCounter = 0;
     }
 }
 
@@ -147,7 +158,7 @@ void processAIAction(float thrustVal, float strafeVal, float rotationVal, float 
     // Apply using SpaceShip methods (SAME AS TRAINING SIMULATION)
     // Thrust
     if (thrustVal > 0.1f) {
-        ship.thrust(thrustVal * 0.5);
+        ship.thrust(thrustVal * THRUST_POWER);
         currentShipState = ShipState::Boost;
     } else {
         currentShipState = ShipState::Idle;
@@ -155,7 +166,7 @@ void processAIAction(float thrustVal, float strafeVal, float rotationVal, float 
 
     // Strafe
     if (std::abs(strafeVal) > 0.1f) {
-        ship.strafe(strafeVal > 0 ? 1 : -1, std::abs(strafeVal) * 0.3);
+        ship.strafe(strafeVal > 0 ? 1 : -1, std::abs(strafeVal) * STRAFE_POWER);
         if (strafeVal < 0) {
             currentShipState = ShipState::Left;
         } else {
@@ -168,7 +179,10 @@ void processAIAction(float thrustVal, float strafeVal, float rotationVal, float 
         ship.setRotationAngle(ship.getRotationAngle() + rotationVal * 6.0);
     }
 
-    // Brake
+    // Apply constant drag (ship slows down when not thrusting)
+    ship.applyDrag(DRAG_FACTOR);
+
+    // Additional braking on top of drag
     if (brakeVal > 0.1f) {
         ship.applyDrag(1.0f - brakeVal * 0.1f);
     }
@@ -249,7 +263,7 @@ void runGameMode()
         window.processMessages();
 
         // Render initial frame (frozen)
-        window.render(playerX, playerY, station, enemyBullets, 0, "Press SPACE to start", currentShipState);
+        window.render(playerX, playerY, ship.getRotationAngle(), station, enemyBullets, 0, "Press SPACE to start", currentShipState);
 
         // Check for space key
         if (GetAsyncKeyState(VK_SPACE) & 0x8000) {
@@ -269,9 +283,15 @@ void runGameMode()
         // Handle window messages
         window.processMessages();
 
-        // AI decision FIRST (same order as training simulation)
-        // Training: sensors -> decision -> physics -> bullets update
-        // So AI sees bullet positions BEFORE they move this frame
+        // MATCH TRAINING ORDER: bullets fire -> bullets update -> AI decision -> ship physics -> win check
+        // Fire and update bullets FIRST
+        updateStationFire();
+        updateEnemyBullets();
+
+        // Check if hit by bullet (game over)
+        if (gameLost) break;
+
+        // NOW AI makes decision based on current bullet positions
         // Calculate station info
         double stationDx = STATION_X - playerX;
         double stationDy = STATION_Y - playerY;
@@ -307,7 +327,7 @@ void runGameMode()
             static_cast<float>(playerY / WINDOW_HEIGHT),             // 1: Ship Y
             static_cast<float>(vel.getX() / 10.0f),                  // 2: Ship velocity X
             static_cast<float>(vel.getY() / 10.0f),                  // 3: Ship velocity Y
-            0.0f,                                                     // 4: Ship rotation
+            static_cast<float>(ship.getRotationAngle() / 360.0f),      // 4: Ship rotation (normalized)
             static_cast<float>(stationDistance / 500.0f),             // 5: Station distance
             static_cast<float>(stationAngle / 3.14159f),              // 6: Station angle
             static_cast<float>(closestBulletDistance / 500.0f),       // 7: Closest bullet distance
@@ -318,26 +338,28 @@ void runGameMode()
         };
 
         Matrix decision = aiController->predict(gameState);
-        // Extract 4 outputs: thrust, strafe, rotation, brake
-        processAIAction(
-            decision.data[0][0],  // thrust
-            decision.data[0][1],  // strafe
-            decision.data[0][2],  // rotation
-            decision.data[0][3]   // brake
-        );
+        // Extract 4 outputs - tanh gives -1 to +1 directly
+        // Thrust and brake: convert from -1,+1 to 0,1
+        float thrustVal = (decision.data[0][0] + 1.0f) / 2.0f;
+        float strafeVal = decision.data[0][1];   // Already -1 to +1
+        float rotationVal = decision.data[0][2]; // Already -1 to +1
+        float brakeVal = (decision.data[0][3] + 1.0f) / 2.0f;
+
+        // Debug output every 10 frames
+        if (frameCount % 10 == 0) {
+            std::cout << "Frame " << frameCount << " | Rotation (tanh): " << rotationVal << std::endl;
+        }
+
+        processAIAction(thrustVal, strafeVal, rotationVal, brakeVal);
 
         // Update ship physics (same as training)
         updateShipPosition();
-
-        // NOW update bullets and check collisions (AFTER ship moved, same as training)
-        updateStationFire();
-        updateEnemyBullets();
 
         // Check win condition
         checkWinCondition();
 
         // Render game
-        window.render(playerX, playerY, station, enemyBullets, frameCount, gameStatus, currentShipState);
+        window.render(playerX, playerY, ship.getRotationAngle(), station, enemyBullets, frameCount, gameStatus, currentShipState);
 
         // Progress indicator
         if (frameCount % 500 == 0) {

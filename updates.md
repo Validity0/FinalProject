@@ -160,3 +160,103 @@ Now surviving 500 frames without winning costs 10+ points, while winning quickly
 4. **Centralize shared logic** - putting physics in the SpaceShip class and using it everywhere prevents sync issues.
 
 5. **Debug by comparing frame-by-frame** - when models don't transfer, the devil is in the details of execution order and timing.
+
+---
+
+## Session 11: Tanh Activation and Output Range Fix
+
+### The Rotation Problem
+Ship was only ever rotating in one direction - the rotation output was stuck around 0.55-0.60, never going negative. This was because sigmoid activation outputs 0-1, and even with transformation `(output - 0.5) * 2`, the network wasn't learning to output values below 0.5.
+
+### Solution: Tanh Activation
+Changed the output layer to use **tanh** activation instead of sigmoid:
+- Sigmoid: outputs 0 to 1
+- Tanh: outputs -1 to +1 directly
+
+Updated `Layer.h/cpp` to support a `useTanh` flag. Output layer uses tanh, hidden layers still use sigmoid.
+
+Also had to fix backpropagation to use the correct derivative:
+- Sigmoid derivative: `y * (1 - y)`
+- Tanh derivative: `1 - y²`
+
+### Training Data Updates
+Training targets now use -1 to +1 range directly for strafe and rotation. Thrust and brake are stored as -1 to +1 internally, then converted back to 0-1 after prediction.
+
+---
+
+## Session 12: Bullet Mechanics Overhaul
+
+### Bullet Wrapping
+Bullets now wrap around screen edges instead of being deleted. This makes the game harder and more consistent - you can't just run to a corner.
+
+### Safe Zone
+Added a safe zone around the station (100px radius) where no bullets are fired. This prevents the AI from getting killed right as it reaches the goal.
+
+### Prediction Cap Bug Fix
+Bullets weren't aiming at the ship! The issue was the prediction math with slow bullet speed:
+- `timeToHit = distance / BULLET_SPEED`
+- With BULLET_SPEED = 2.0 and distance = 300: timeToHit = 150 frames
+- With ship velocity 3: prediction offset = 3 * 150 * 0.7 = **315 pixels** (off screen!)
+
+Fixed by capping `timeToHit` to max 60 frames. Now bullets actually lead the target properly.
+
+---
+
+## Session 13: Code Consolidation - GameLogic
+
+### The Simulation/Game Mismatch
+Models that won in training simulation kept failing in game mode. Even with "identical" code, there were subtle differences causing inconsistent behavior.
+
+### Solution: Shared GameLogic Class
+Created `GameLogic.h` and `GameLogic.cpp` with all shared simulation logic:
+- `SimBullet` struct for lightweight bullet representation
+- `SimulationResult` struct with win/hit/loss/frames
+- `runSimulation()` - complete simulation loop
+- `fireAtShip()` - predictive bullet firing
+- `updateBullets()` - movement and wrapping
+- `checkBulletCollision()` - collision detection
+- `applyAIDecision()` - neural network output processing
+
+TrainingManager now uses `GameLogic::runSimulation()` instead of its own simulation code.
+
+### Execution Order Fix
+Made sure game mode uses same order as training:
+1. Fire bullets
+2. Update bullets
+3. Check collision
+4. AI decision
+5. Ship physics
+6. Win check
+
+---
+
+## Session 14: Model Validation - Preventing Lucky Wins
+
+### The Problem
+A model could "win" by getting lucky with a favorable spawn position or bullet pattern. One lucky win would save it as the best model, wasting an entire training cycle.
+
+### Solution: Validation Testing
+When a model wins a single simulation, it must now **prove it wasn't luck**:
+1. Run 10 additional simulations with different random seeds
+2. Model must win at least 7/10 (70%) to be saved
+3. Lucky one-off wins are rejected with "LUCKY WIN (rejected)"
+
+This ensures only consistent performers are saved as best models.
+
+### Settings
+```cpp
+const int VALIDATION_TESTS = 10;
+const int VALIDATION_REQUIRED_WINS = 7;
+```
+
+---
+
+## Key Lessons (Continued)
+
+6. **Activation functions matter for output range** - sigmoid can't easily learn to output negative values. Use tanh when you need -1 to +1.
+
+7. **Prediction math can overflow** - always sanity check calculations that depend on division (like time-to-hit with slow projectiles).
+
+8. **One win means nothing** - always validate with multiple runs to filter out lucky models.
+
+9. **Consolidate shared logic into one place** - having simulation code in multiple files guaranteed subtle differences. One source of truth is essential.

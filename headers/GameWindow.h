@@ -51,7 +51,7 @@ public:
     ~GameWindow();
 
     bool initialize();
-    void render(double shipX, double shipY, const SpaceStation& station,
+    void render(double shipX, double shipY, float shipRotation, const SpaceStation& station,
                 const std::vector<Bullet>& bullets, int frameCount, const std::string& status,
                 ShipState shipState);
     bool isOpen() const { return isRunning; }
