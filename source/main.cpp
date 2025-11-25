@@ -249,7 +249,7 @@ void runGameMode()
         window.processMessages();
 
         // Render initial frame (frozen)
-        window.render(playerX, playerY, station, enemyBullets, 0, "Press SPACE to start", currentShipState);
+        window.render(playerX, playerY, ship.getRotationAngle(), station, enemyBullets, 0, "Press SPACE to start", currentShipState);
 
         // Check for space key
         if (GetAsyncKeyState(VK_SPACE) & 0x8000) {
@@ -337,7 +337,7 @@ void runGameMode()
         checkWinCondition();
 
         // Render game
-        window.render(playerX, playerY, station, enemyBullets, frameCount, gameStatus, currentShipState);
+        window.render(playerX, playerY, ship.getRotationAngle(), station, enemyBullets, frameCount, gameStatus, currentShipState);
 
         // Progress indicator
         if (frameCount % 500 == 0) {
